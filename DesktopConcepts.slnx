@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/DesktopConcepts.Application/DesktopConcepts.Application.csproj" />
+    <Project Path="src/DesktopConcepts.Domain/DesktopConcepts.Domain.csproj" />
+    <Project Path="src/DesktopConcepts.Infrastructure/DesktopConcepts.Infrastructure.csproj" />
+    <Project Path="src/DesktopConcepts.UI/DesktopConcepts.UI.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/DesktopConcepts.Tests/DesktopConcepts.Tests.csproj" />
+  </Folder>
+</Solution>

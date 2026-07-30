@@ -1,0 +1,64 @@
+## .NET / C# / WPF — DesktopConcepts
+
+# Build outputs
+[Bb]in/
+[Oo]bj/
+[Oo]ut/
+[Ll]og/
+[Ll]ogs/
+
+# NuGet
+*.nupkg
+*.snupkg
+.nuget/
+packages/
+project.lock.json
+project.fragment.lock.json
+artifacts/
+
+# Visual Studio / Rider / VS Code
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.userprefs
+
+# Test results
+TestResults/
+[Cc]overage*/
+*.coverage
+*.coveragexml
+
+# Publish output
+publish/
+PublishOutput/
+
+# Installers / release builds
+*.msi
+*.exe
+release/
+dist/
+
+# OS artefacts
+Thumbs.db
+Desktop.ini
+.DS_Store
+ehthumbs.db
+
+# Secrets — never commit these
+*.pfx
+*.p12
+appsettings.*.json
+!appsettings.json
+secrets.json
+.env
+
+# App data (user-specific, never in repo)
+History.md
+Settings.json
+last_run.txt
+Models/
+Logs/

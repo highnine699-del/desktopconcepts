@@ -1,0 +1,23 @@
+{
+  "Mode": "local",
+  "Theme": "dark",
+  "Provider": {
+    "BaseUrl": "http://localhost:1234/v1",
+    "Model": "phi-3-mini",
+    "ApiKey": null
+  },
+  "CloudProvider": {
+    "BaseUrl": "https://api.anthropic.com/v1",
+    "Model": "claude-haiku-4-5",
+    "ApiKey": null
+  },
+  "Topics": {
+    "Monday":    "Programming",
+    "Tuesday":   "Cybersecurity",
+    "Wednesday": "Networking",
+    "Thursday":  "AI",
+    "Friday":    "Operating Systems",
+    "Saturday":  "Mathematics",
+    "Sunday":    "Computer Engineering"
+  }
+}
