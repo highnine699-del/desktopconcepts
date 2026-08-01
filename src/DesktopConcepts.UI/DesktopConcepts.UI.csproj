@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
@@ -8,6 +8,8 @@
     <UseWPF>true</UseWPF>
     <AssemblyName>DesktopConcepts</AssemblyName>
     <RootNamespace>DesktopConcepts.UI</RootNamespace>
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+    <Version>1.0.3</Version>
   </PropertyGroup>
 
   <ItemGroup>
@@ -22,3 +24,6 @@
   </ItemGroup>
 
 </Project>
+
+
+

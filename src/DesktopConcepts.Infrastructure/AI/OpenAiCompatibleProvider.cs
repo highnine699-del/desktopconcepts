@@ -17,7 +17,7 @@ namespace DesktopConcepts.Infrastructure.AI;
 public sealed class OpenAiCompatibleProvider : IConceptProvider
 {
     private readonly HttpClient _http;
-    private readonly ProviderSettings _settings;
+    private readonly ISettingsStore _settingsStore;
     private readonly ILogger<OpenAiCompatibleProvider> _logger;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -27,16 +27,25 @@ public sealed class OpenAiCompatibleProvider : IConceptProvider
 
     public OpenAiCompatibleProvider(
         HttpClient http,
-        ProviderSettings settings,
+        ISettingsStore settingsStore,
         ILogger<OpenAiCompatibleProvider> logger)
     {
         _http = http;
-        _settings = settings;
+        _settingsStore = settingsStore;
         _logger = logger;
+    }
 
-        if (!string.IsNullOrEmpty(settings.ApiKey))
-            _http.DefaultRequestHeaders.Authorization =
-                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", settings.ApiKey);
+    private async Task<ProviderSettings> GetEffectiveSettingsAsync(CancellationToken cancellationToken)
+    {
+        var settings = await _settingsStore.LoadAsync(cancellationToken);
+        var providerSettings = settings.Mode == "cloud"
+            ? settings.EffectiveCloudProvider
+            : settings.Provider;
+
+        _logger.LogInformation("Provider resolved: Mode={Mode}, BaseUrl={BaseUrl}, Model={Model}",
+            settings.Mode, providerSettings.BaseUrl, providerSettings.Model);
+
+        return providerSettings;
     }
 
     public async Task<Concept> GenerateConceptAsync(
@@ -44,6 +53,8 @@ public sealed class OpenAiCompatibleProvider : IConceptProvider
         IReadOnlyCollection<string> recentTitlesToAvoid,
         CancellationToken cancellationToken)
     {
+        var settings = await GetEffectiveSettingsAsync(cancellationToken);
+
         var avoidClause = recentTitlesToAvoid.Count > 0
             ? $" Avoid repeating any of these previous titles: {string.Join(", ", recentTitlesToAvoid)}."
             : string.Empty;
@@ -55,14 +66,34 @@ public sealed class OpenAiCompatibleProvider : IConceptProvider
             $"{{\"title\": \"...\", \"explanation\": \"...\"}}.{avoidClause}";
 
         var request = new ChatRequest(
-            Model: _settings.Model,
+            Model: settings.Model,
             Messages: [new ChatMessage(Role: "user", Content: prompt)],
             Temperature: 0.8);
 
-        var url = $"{_settings.BaseUrl.TrimEnd('/')}/chat/completions";
+        var url = $"{settings.BaseUrl.TrimEnd('/')}/chat/completions";
         _logger.LogDebug("Requesting concept for category '{Category}' from {Url}", category, url);
 
-        var response = await _http.PostAsJsonAsync(url, request, cancellationToken);
+        // Set Authorization header dynamically based on current settings
+        var requestMessage = new HttpRequestMessage(HttpMethod.Post, url);
+        requestMessage.Content = JsonContent.Create(request);
+
+        if (!string.IsNullOrEmpty(settings.ApiKey))
+            requestMessage.Headers.Authorization =
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", settings.ApiKey);
+
+        var response = await _http.SendAsync(requestMessage, cancellationToken);
+
+        // Detect shared-quota exhaustion (HTTP 429) before the generic EnsureSuccessStatusCode.
+        // This gets a distinct exception type so callers can show a friendly "try tomorrow"
+        // message instead of the generic error view — and log it separately from real failures.
+        if ((int)response.StatusCode == 429)
+        {
+            _logger.LogWarning("HTTP 429 from {Url} — shared quota reached.", url);
+            throw new QuotaExceededException(
+                $"The cloud provider rate limit was reached (HTTP 429 from {settings.BaseUrl}). " +
+                "Try again tomorrow, or switch to Local mode in Settings for unlimited use.");
+        }
+
         response.EnsureSuccessStatusCode();
 
         var payload = await response.Content.ReadFromJsonAsync<ChatResponse>(JsonOptions, cancellationToken)

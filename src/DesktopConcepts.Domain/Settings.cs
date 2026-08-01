@@ -9,31 +9,59 @@ public interface ISettingsStore
 /// <summary>
 /// Full application settings. Validated on load — corrupt JSON falls back to Default().
 ///
-/// IsFirstRun: true until the user completes the setup-time mode choice screen.
-/// The setup screen writes false and saves before any other first-run logic runs.
+/// IsFirstRun:            true until the user completes the setup-time mode choice screen.
+/// HasSeenTrayHint:       true once the first-run "× closes to tray" banner has been dismissed.
+/// AdvancedCloudProvider: null = use the default shared proxy (zero setup for users).
+///                        non-null = user has chosen to override with their own provider key.
 /// </summary>
 public sealed record AppSettings(
-    string Mode,                    // "local" | "cloud"
+    string Mode,                            // "local" | "cloud"
     string Theme,
-    bool IsFirstRun,                // true = setup choice not yet made
-    ProviderSettings Provider,
-    ProviderSettings CloudProvider,
-    WeekdayTopicMap Topics)
+    bool IsFirstRun,                        // true = setup choice not yet made
+    bool HasSeenTrayHint,                   // false = tray-hint banner not yet shown
+    ProviderSettings Provider,              // local AI endpoint
+    ProviderSettings CloudProvider,         // default shared proxy (no user key required)
+    ProviderSettings? AdvancedCloudProvider, // optional: user's own key/endpoint override
+    WeekdayTopicMap Topics,
+    WindowPosition? WidgetPosition,         // saved widget position (null = use default)
+    double WidgetOpacity,                   // 0.4 to 1.0, default 1.0 (fully opaque)
+    bool PinBehindDesktopIcons)             // experimental WorkerW mode, default false
 {
+    /// <summary>
+    /// The Groq proxy base URL.
+    /// This is a Cloudflare Worker that forwards to Groq with a server-held key.
+    /// Users never see or enter an API key for the default cloud experience.
+    /// Shared quota is owned by the app developers, not each individual user.
+    /// </summary>
+    public const string DefaultProxyBaseUrl = "https://groqapikey.highnine699.workers.dev/v1";
+
+    /// <summary>
+    /// Returns the effective cloud ProviderSettings to use at runtime.
+    /// If the user has set an AdvancedCloudProvider, that takes priority.
+    /// Otherwise the default shared proxy is used (no key needed).
+    /// </summary>
+    public ProviderSettings EffectiveCloudProvider =>
+        AdvancedCloudProvider is { ApiKey: { Length: > 0 } }
+            ? AdvancedCloudProvider
+            : CloudProvider;
+
     public static AppSettings Default() => new(
-        Mode: "local",
-        Theme: "dark",
-        IsFirstRun: true,
+        Mode:            "local",
+        Theme:           "dark",
+        IsFirstRun:      true,
+        HasSeenTrayHint: false,
         Provider: new ProviderSettings(
             BaseUrl: "http://localhost:1234/v1",
-            Model: "phi-3-mini",
-            ApiKey: null),
-        // Default cloud model: Claude Haiku 4.5
-        // Cheap enough at this app's volume (a few short generations/day) that cost is negligible.
+            Model:   "phi-3-mini",
+            ApiKey:  null),
+        // Default cloud: shared Groq proxy via Cloudflare Worker.
+        // Free for every user — no API key, no billing, no signup required.
+        // Users who want their own provider can set AdvancedCloudProvider instead.
         CloudProvider: new ProviderSettings(
-            BaseUrl: "https://api.anthropic.com/v1",
-            Model: "claude-haiku-4-5",
-            ApiKey: null),
+            BaseUrl: DefaultProxyBaseUrl,
+            Model:   "llama-3.3-70b-versatile",
+            ApiKey:  null),
+        AdvancedCloudProvider: null,
         Topics: new WeekdayTopicMap(new Dictionary<DayOfWeek, string>
         {
             [DayOfWeek.Monday]    = "Programming",
@@ -43,10 +71,17 @@ public sealed record AppSettings(
             [DayOfWeek.Friday]    = "Operating Systems",
             [DayOfWeek.Saturday]  = "Mathematics",
             [DayOfWeek.Sunday]    = "Computer Engineering",
-        }));
+        }),
+        WidgetPosition: null,           // null = use default top-right position
+        WidgetOpacity: 1.0,             // fully opaque by default
+        PinBehindDesktopIcons: false);   // experimental feature off by default
 }
 
 public sealed record ProviderSettings(
     string BaseUrl,
     string Model,
     string? ApiKey);
+
+public sealed record WindowPosition(
+    double Left,
+    double Top);

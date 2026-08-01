@@ -122,11 +122,15 @@ public class CloudPrefetchService
             await _buffer.AddRangeAsync(newSets, cancellationToken);
             _logger.LogInformation("Prefetch complete. Added {Count} sets.", newSets.Count);
         }
+        catch (QuotaExceededException)
+        {
+            // Re-throw so callers can distinguish quota from network failures
+            _logger.LogWarning("Quota exceeded during prefetch — propagating to caller.");
+            throw;
+        }
         catch (Exception ex)
         {
-            // Network unavailable or API key missing — log and surface nothing to UI.
-            // The buffer will just have fewer days; the caller falls back to error view
-            // when it eventually tries to consume an empty buffer.
+            // Network unavailable or other transient failure — log and surface nothing to UI.
             _logger.LogWarning(ex, "Prefetch failed — will retry on next trigger.");
         }
     }
@@ -170,8 +174,11 @@ public class CloudPrefetchService
     {
         try
         {
-            // Lightweight check: DNS lookup of a reliable host; no HTTP request needed
-            await System.Net.Dns.GetHostAddressesAsync("api.anthropic.com", cancellationToken);
+            // Resolve the proxy's own host — if this succeeds the Worker is reachable.
+            // Using the proxy host rather than a third-party domain means a positive result
+            // directly implies the default cloud endpoint is up, not just "internet exists".
+            var proxyHost = new Uri(AppSettings.DefaultProxyBaseUrl).Host;
+            await System.Net.Dns.GetHostAddressesAsync(proxyHost, cancellationToken);
             return true;
         }
         catch

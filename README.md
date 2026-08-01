@@ -65,6 +65,41 @@ Single self-contained executable — no .NET runtime required on the target mach
 
 ---
 
+## Building the Windows installer
+
+To create a proper Windows installer (Setup.exe) with Inno Setup:
+
+### Prerequisites
+- [Inno Setup Compiler](http://jrsoftware.org/isdl.php) (free, Windows-only)
+
+### 1. Publish the application
+```powershell
+dotnet publish src/DesktopConcepts.UI/DesktopConcepts.UI.csproj `
+  -p:PublishProfile=win-x64-release `
+  -c Release
+```
+
+### 2. Compile the installer
+```powershell
+# Open installer/DesktopConcepts.iss in Inno Setup Compiler
+# Or compile from command line:
+"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\DesktopConcepts.iss
+```
+
+Output: `installer/Output/DesktopConcepts-Setup.exe`
+
+### 3. Install and uninstall
+- **Install**: Run `DesktopConcepts-Setup.exe` — installs to `C:\Program Files\DesktopConcepts` by default
+- **Uninstall**: Use Windows "Add or Remove Programs" or run the uninstaller from the Start Menu
+
+**Installer options** (presented during installation):
+- Desktop shortcut (unchecked by default — this is a quiet widget)
+- Auto-start on Windows startup (checked by default — main use case)
+
+**Note on user data**: The installer does not delete `%AppData%\DesktopConcepts\` on uninstall. Your concepts, settings, and history are preserved. To clean them manually, delete that folder.
+
+---
+
 ## Running tests
 
 ```powershell

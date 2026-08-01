@@ -34,18 +34,13 @@ public partial class App : System.Windows.Application
                 logPath,
                 rollingInterval:        RollingInterval.Day,
                 retainedFileCountLimit: 14,
-                outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss} [{Level:u3}] {Message:lj}{NewLine}{Exception}")
+                outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss} [{Level:u3}] {Message:lj}{NewLine}{Exception}",
+                encoding:               System.Text.Encoding.UTF8)
             .CreateLogger();
 
         // ── Load settings before DI graph build ───────────────────────────────
-        // Resolves ProviderSettings (local vs cloud) so the AI provider
-        // HttpClient factory can be wired with the correct base-URL at startup.
-        var settingsStore    = new JsonSettingsStore(
+        var settingsStore = new JsonSettingsStore(
             Microsoft.Extensions.Logging.Abstractions.NullLogger<JsonSettingsStore>.Instance);
-        var settings         = await settingsStore.LoadAsync(CancellationToken.None);
-        var providerSettings = settings.Mode == "cloud"
-            ? settings.CloudProvider
-            : settings.Provider;
 
         // ── Build DI host ─────────────────────────────────────────────────────
         _host = Host.CreateDefaultBuilder()
@@ -61,7 +56,7 @@ public partial class App : System.Windows.Application
                 services.AddSingleton<IConceptBufferStore, JsonConceptBufferStore>();
 
                 // AI provider — generic OpenAI-compatible endpoint
-                services.AddSingleton(_ => providerSettings);
+                // Provider now resolves settings dynamically via ISettingsStore
                 services.AddHttpClient<IConceptProvider, OpenAiCompatibleProvider>();
 
                 // Model download service (local first-run)
@@ -81,6 +76,7 @@ public partial class App : System.Windows.Application
 
                 // ── UI ────────────────────────────────────────────────────────
                 services.AddSingleton<WidgetWindow>();
+                services.AddTransient<SettingsWindow>();  // transient: new instance each open
             })
             .Build();
 
@@ -98,8 +94,9 @@ public partial class App : System.Windows.Application
             .First();
 
         var window = _host.Services.GetRequiredService<WidgetWindow>();
-        bgService.ConceptSetReady  += set => window.OnConceptSetReady(set);
-        bgService.GenerationFailed += ex  => window.OnGenerationFailed(ex);
+        bgService.ConceptSetReady   += set => window.OnConceptSetReady(set);
+        bgService.GenerationFailed  += ex  => window.OnGenerationFailed(ex);
+        bgService.QuotaExceeded     += ()  => window.OnQuotaExceeded();
 
         MainWindow = window;
         window.Show();

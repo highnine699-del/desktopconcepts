@@ -18,10 +18,11 @@ public sealed class JsonSettingsStoreTests : IDisposable
         var store    = new JsonSettingsStore(NullLogger<JsonSettingsStore>.Instance, _tempPath);
         var settings = await store.LoadAsync(CancellationToken.None);
 
-        Assert.Equal("local", settings.Mode);
-        Assert.Equal("dark",  settings.Theme);
-        Assert.Equal("phi-3-mini", settings.Provider.Model);
-        Assert.Equal("claude-haiku-4-5", settings.CloudProvider.Model);
+        Assert.Equal("local",  settings.Mode);
+        Assert.Equal("dark",   settings.Theme);
+        Assert.Equal("phi-3-mini",           settings.Provider.Model);
+        Assert.Equal("llama-3.3-70b-versatile", settings.CloudProvider.Model);
+        Assert.Null(settings.AdvancedCloudProvider);
         Assert.True(settings.IsFirstRun, "Default settings must have IsFirstRun=true.");
     }
 

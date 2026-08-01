@@ -32,6 +32,13 @@ public class ConceptGenerationBackgroundService : BackgroundService
     public event Action<DailyConceptSet>? ConceptSetReady;
     public event Action<Exception>?       GenerationFailed;
 
+    /// <summary>
+    /// Raised when HTTP 429 is returned by the cloud provider (shared quota reached).
+    /// Distinct from GenerationFailed — the UI shows a friendly "try tomorrow" message,
+    /// not the generic error view, and the failure is not retried.
+    /// </summary>
+    public event Action? QuotaExceeded;
+
     private static readonly string LastRunPath = System.IO.Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         "DesktopConcepts", "last_run.txt");
@@ -48,8 +55,15 @@ public class ConceptGenerationBackgroundService : BackgroundService
         _logger    = logger;
 
         // Forward DailyConceptScheduler events (local mode)
+        // QuotaExceededException is intercepted here before GenerationFailed
         _scheduler.ConceptSetGenerated += set => ConceptSetReady?.Invoke(set);
-        _scheduler.GenerationFailed    += ex  => GenerationFailed?.Invoke(ex);
+        _scheduler.GenerationFailed    += ex =>
+        {
+            if (ex is QuotaExceededException)
+                QuotaExceeded?.Invoke();
+            else
+                GenerationFailed?.Invoke(ex);
+        };
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -109,7 +123,26 @@ public class ConceptGenerationBackgroundService : BackgroundService
         }
         else
         {
-            // Buffer exhausted and internet unavailable — surface the existing error view
+            // Buffer exhausted — attempt a live refill to distinguish quota vs. offline
+            _logger.LogWarning("Buffer empty for {Today} — attempting live refill.", today);
+            try
+            {
+                await _prefetch.FillToTargetAsync(cancellationToken);
+                var freshSet = await _prefetch.TryConsumeAsync(cancellationToken);
+                if (freshSet is not null)
+                {
+                    ConceptSetReady?.Invoke(freshSet);
+                    return;
+                }
+            }
+            catch (QuotaExceededException qex)
+            {
+                _logger.LogWarning(qex, "Shared cloud quota reached for {Today}.", today);
+                QuotaExceeded?.Invoke();
+                return;
+            }
+
+            // Still empty after refill attempt and no quota signal → real failure
             _logger.LogWarning("Cloud buffer exhausted and prefetch unavailable for {Today}.", today);
             GenerationFailed?.Invoke(
                 new InvalidOperationException(

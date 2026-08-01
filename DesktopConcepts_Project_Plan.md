@@ -118,14 +118,29 @@ DesktopConcepts
 IConceptProvider
     GenerateConceptAsync(category, recentTitlesToAvoid) → Concept
          ├── LocalProvider   (generic OpenAI-compatible local endpoint)
-         └── CloudProvider   (stub in v1, wired in later)
+         └── CloudProvider   (Cloudflare Worker proxy → Groq, or user's own key)
 ```
 
-**Correction to the earlier draft:** don't hardcode against LM Studio specifically. Implement the local provider against a **generic OpenAI-compatible chat completion endpoint** (`POST /v1/chat/completions` style). LM Studio, Ollama's OpenAI-compat mode, and most local inference servers all speak this same shape, so this one implementation covers all of them with no extra work — and nothing else in the app needs to change to swap between them or add cloud later (OpenAI, Anthropic, Gemini, whatever Kevwe eventually wants).
+**Correction to the earlier draft:** don't hardcode against LM Studio specifically. Implement the local provider against a **generic OpenAI-compatible chat completion endpoint** (`POST /v1/chat/completions` style). LM Studio, Ollama's OpenAI-compat mode, and most local inference servers all speak this same shape, so this one implementation covers all of them with no extra work — and nothing else in the app needs to change to swap between them or add cloud later.
 
 Config just points at a base URL + model name; the provider doesn't care what's actually serving it.
 
-**Default cloud model (when cloud tier is built):** `claude-haiku-4-5` (Anthropic). At the usage volume of this app (a handful of short generations per day per user), cost is not a meaningful constraint — Haiku 4.5 is cheap enough to be effectively free at this scale while delivering a clear quality step up over local inference. This only applies to the optional cloud upgrade path; local mode (free, default) is unchanged.
+**Default cloud provider: Groq via Cloudflare Worker proxy**
+
+The default `CloudProvider.BaseUrl` points at a Cloudflare Worker (`groqapikey.highnine699.workers.dev/v1`) that forwards requests to Groq using a server-held API key. Users never see, enter, or store an API key for the default cloud experience.
+
+Rationale:
+- Groq's free tier is genuinely free — no billing account or credit card required, instant signup — making it the right default over Claude (prepaid credits required).
+- The proxy keeps the key server-side so it cannot be reverse-engineered from the installed binary.
+- **Shared-quota risk:** because all users share one Groq quota through the proxy, the developers (Kevwe/Josiah) own the quota ceiling, not each user. The app handles HTTP 429 from the proxy with a distinct `QuotaExceededException` so users see a friendly "daily limit reached — try tomorrow" message rather than a generic error. This is logged separately so quota events are easy to spot in production.
+- Advanced users who want unlimited use or their own provider can override by supplying their own base URL + model + API key in Settings → Advanced. That key goes directly to their chosen endpoint, never through the shared proxy.
+
+**`AdvancedCloudProvider` in AppSettings (nullable):**
+- `null` = use the default shared proxy, no key required
+- non-null with key = use the user's own provider; `EffectiveCloudProvider` returns this automatically
+- The Settings screen shows the advanced section collapsed by default so non-technical users never see it
+
+**`QuotaExceededException`** is a Domain type thrown by `OpenAiCompatibleProvider` when it receives HTTP 429. `ConceptGenerationBackgroundService` catches it distinctly and raises `QuotaExceeded` (not `GenerationFailed`), which surfaces `QuotaView` in the UI.
 
 ---
 

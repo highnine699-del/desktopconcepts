@@ -11,7 +11,8 @@
         ShowInTaskbar="False"
         ResizeMode="NoResize"
         WindowStartupLocation="Manual"
-        Left="40" Top="40">
+        Left="40" Top="40"
+        MouseLeftButtonDown="Window_MouseLeftButtonDown">
 
     <!-- Right-click context menu on the widget itself (Task 2) -->
     <Window.ContextMenu>
@@ -123,14 +124,14 @@
                                         Padding="5,1"
                                         Margin="8,0,0,0"
                                         VerticalAlignment="Center">
-                                    <TextBlock Text="Lightweight · Needs API key"
+                                    <TextBlock Text="Free · No API key needed"
                                                Foreground="{StaticResource BrushText}"
                                                FontFamily="{StaticResource FontPrimary}"
                                                FontSize="{StaticResource FontSizeSmall}"
                                                FontWeight="SemiBold"/>
                                 </Border>
                             </StackPanel>
-                            <TextBlock Text="Lighter install. Requires an internet connection and your own Anthropic API key. Prefetches concepts in advance so it works even with occasional outages."
+                            <TextBlock Text="Works immediately — no account, no API key, no setup. Concepts are generated via a shared cloud service. A daily free limit applies; the app lets you know if it's reached."
                                        Foreground="{StaticResource BrushTextMuted}"
                                        FontFamily="{StaticResource FontPrimary}"
                                        FontSize="{StaticResource FontSizeSmall}"
@@ -149,37 +150,91 @@
 
             <!-- ══ COMPACT VIEW ══════════════════════════════════════════ -->
             <Border x:Name="CompactView"
-                    Padding="14,10"
-                    Cursor="Hand"
-                    MouseLeftButtonUp="CompactView_Click">
+                    Padding="10,8">
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
 
                     <!-- Coloured category dot -->
                     <Ellipse Grid.Column="0" Width="8" Height="8"
                              Fill="{StaticResource BrushPrimary}"
-                             VerticalAlignment="Center"
-                             Margin="0,0,8,0"/>
+                             VerticalAlignment="Top"
+                             Margin="0,2,8,0"/>
 
-                    <TextBlock Grid.Column="1"
-                               x:Name="BadgeLabel"
-                               Text="Today's concept"
-                               Foreground="{StaticResource BrushTextMuted}"
-                               FontFamily="{StaticResource FontPrimary}"
-                               FontSize="{StaticResource FontSizeBadge}"
-                               VerticalAlignment="Center"
-                               TextTrimming="CharacterEllipsis"/>
+                    <!-- Title + teaser — clicking expands -->
+                    <StackPanel Grid.Column="1"
+                                Cursor="Hand"
+                                MouseLeftButtonUp="CompactView_Click">
+                        <TextBlock x:Name="CompactTitle"
+                                   Text="Loading…"
+                                   Foreground="{StaticResource BrushText}"
+                                   FontFamily="{StaticResource FontPrimary}"
+                                   FontSize="{StaticResource FontSizeBody}"
+                                   FontWeight="SemiBold"
+                                   TextTrimming="CharacterEllipsis"
+                                   Margin="0,0,0,2"/>
+                        <TextBlock x:Name="CompactTeaser"
+                                   Text="Today's concept"
+                                   Foreground="{StaticResource BrushTextMuted}"
+                                   FontFamily="{StaticResource FontPrimary}"
+                                   FontSize="{StaticResource FontSizeSmall}"
+                                   TextTrimming="CharacterEllipsis"
+                                   MaxHeight="32"
+                                   TextWrapping="Wrap"/>
+                    </StackPanel>
 
+                    <!-- Expand chevron -->
                     <TextBlock Grid.Column="2"
                                Text="▸"
                                Foreground="{StaticResource BrushTextMuted}"
                                FontSize="10"
                                VerticalAlignment="Center"
-                               Margin="6,0,0,0"/>
+                               Margin="6,0,4,0"
+                               Cursor="Hand"
+                               MouseLeftButtonUp="CompactView_Click"/>
+
+                    <!-- × close-to-tray — always visible, no hover required -->
+                    <Button Grid.Column="3"
+                            x:Name="CompactCloseButton"
+                            Content="×"
+                            ToolTip="Close to tray (right-click tray icon to fully quit)"
+                            Cursor="Hand"
+                            Click="CloseToTray_Click"
+                            Background="Transparent"
+                            BorderThickness="0"
+                            Foreground="{StaticResource BrushTextMuted}"
+                            FontSize="14"
+                            FontFamily="{StaticResource FontPrimary}"
+                            Padding="4,0"
+                            VerticalAlignment="Center">
+                        <Button.Style>
+                            <Style TargetType="Button">
+                                <Setter Property="Background" Value="Transparent"/>
+                                <Setter Property="BorderThickness" Value="0"/>
+                                <Setter Property="Cursor" Value="Hand"/>
+                                <Setter Property="Template">
+                                    <Setter.Value>
+                                        <ControlTemplate TargetType="Button">
+                                            <TextBlock Text="{TemplateBinding Content}"
+                                                       Foreground="{TemplateBinding Foreground}"
+                                                       FontSize="{TemplateBinding FontSize}"
+                                                       Padding="{TemplateBinding Padding}"
+                                                       VerticalAlignment="Center"/>
+                                            <ControlTemplate.Triggers>
+                                                <Trigger Property="IsMouseOver" Value="True">
+                                                    <Setter Property="Foreground" Value="{StaticResource BrushError}"/>
+                                                </Trigger>
+                                            </ControlTemplate.Triggers>
+                                        </ControlTemplate>
+                                    </Setter.Value>
+                                </Setter>
+                            </Style>
+                        </Button.Style>
+                    </Button>
                 </Grid>
             </Border>
 
@@ -192,10 +247,11 @@
                 </Border.RenderTransform>
                 <StackPanel>
 
-                    <!-- Header row: category tag + pin toggle -->
+                    <!-- Header row: category tag + pin toggle + close-to-tray -->
                     <Grid Margin="0,0,0,8">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
 
@@ -219,7 +275,44 @@
                                       ToolTip="Pin (keeps this concept visible)"
                                       Checked="PinButton_Checked"
                                       Unchecked="PinButton_Unchecked"
-                                      VerticalAlignment="Center"/>
+                                      VerticalAlignment="Center"
+                                      Margin="0,0,6,0"/>
+
+                        <!-- × close-to-tray in Expanded view -->
+                        <Button Grid.Column="2"
+                                Content="×"
+                                ToolTip="Close to tray (right-click tray icon to fully quit)"
+                                Cursor="Hand"
+                                Click="CloseToTray_Click"
+                                FontSize="16"
+                                FontFamily="{StaticResource FontPrimary}"
+                                Foreground="{StaticResource BrushTextMuted}"
+                                Padding="2,0"
+                                VerticalAlignment="Center">
+                            <Button.Style>
+                                <Style TargetType="Button">
+                                    <Setter Property="Background" Value="Transparent"/>
+                                    <Setter Property="BorderThickness" Value="0"/>
+                                    <Setter Property="Cursor" Value="Hand"/>
+                                    <Setter Property="Template">
+                                        <Setter.Value>
+                                            <ControlTemplate TargetType="Button">
+                                                <TextBlock Text="{TemplateBinding Content}"
+                                                           Foreground="{TemplateBinding Foreground}"
+                                                           FontSize="{TemplateBinding FontSize}"
+                                                           Padding="{TemplateBinding Padding}"
+                                                           VerticalAlignment="Center"/>
+                                                <ControlTemplate.Triggers>
+                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                        <Setter Property="Foreground" Value="{StaticResource BrushError}"/>
+                                                    </Trigger>
+                                                </ControlTemplate.Triggers>
+                                            </ControlTemplate>
+                                        </Setter.Value>
+                                    </Setter>
+                                </Style>
+                            </Button.Style>
+                        </Button>
                     </Grid>
 
                     <!-- Concept title -->
@@ -357,32 +450,110 @@
                                FontSize="{StaticResource FontSizeTitle}"
                                FontWeight="SemiBold"
                                Margin="0,0,0,6"/>
-
                     <TextBlock x:Name="ErrorMessageText"
                                Foreground="{StaticResource BrushTextMuted}"
                                FontFamily="{StaticResource FontPrimary}"
                                FontSize="{StaticResource FontSizeBody}"
                                TextWrapping="Wrap"
                                Margin="0,0,0,14"/>
-
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="8"/>
                             <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
-
-                        <Button Grid.Column="0"
-                                Content="Retry"
+                        <Button Grid.Column="0" Content="Retry"
                                 Style="{StaticResource ButtonPrimary}"
                                 Click="ErrorRetry_Click"/>
-
-                        <Button Grid.Column="2"
-                                Content="AI Settings"
+                        <Button Grid.Column="2" Content="AI Settings"
                                 Style="{StaticResource ButtonBase}"
                                 Click="OpenSettings_Click"/>
                     </Grid>
                 </StackPanel>
+            </Border>
+
+            <!-- ══ QUOTA VIEW (HTTP 429 / shared limit reached) ═════════
+                 Shown instead of ErrorView when the proxy returns 429.
+                 Not a real failure — just a friendly "try tomorrow" message.
+            ═══════════════════════════════════════════════════════════════ -->
+            <Border x:Name="QuotaView"
+                    Visibility="Collapsed"
+                    Padding="16,14">
+                <StackPanel>
+                    <TextBlock Text="Daily cloud limit reached"
+                               Foreground="{StaticResource BrushAccent}"
+                               FontFamily="{StaticResource FontPrimary}"
+                               FontSize="{StaticResource FontSizeTitle}"
+                               FontWeight="SemiBold"
+                               Margin="0,0,0,6"/>
+                    <TextBlock Text="Today's free cloud allowance has been used up. Concepts will resume tomorrow automatically — no action needed."
+                               Foreground="{StaticResource BrushTextMuted}"
+                               FontFamily="{StaticResource FontPrimary}"
+                               FontSize="{StaticResource FontSizeBody}"
+                               TextWrapping="Wrap"
+                               Margin="0,0,0,14"/>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="8"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <!-- Switch to local mode shortcut -->
+                        <Button Grid.Column="0"
+                                Content="Use Local mode"
+                                Style="{StaticResource ButtonBase}"
+                                Click="OpenSettings_Click"
+                                ToolTip="Open Settings to switch to Local AI mode"/>
+                        <!-- Dismiss back to Compact -->
+                        <Button Grid.Column="2"
+                                Content="OK, got it"
+                                Style="{StaticResource ButtonPrimary}"
+                                Click="QuotaDismiss_Click"/>
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <!-- ══ TRAY HINT (shown once on first run, dismissed on click) ══
+                 Teaches the user that × closes to tray, not fully quit.
+                 Persisted via AppSettings.HasSeenTrayHint — never shows again.
+            ═══════════════════════════════════════════════════════════════ -->
+            <Border x:Name="TrayHintBanner"
+                    Visibility="Collapsed"
+                    Background="{StaticResource BrushSurface}"
+                    BorderBrush="{StaticResource BrushBorder}"
+                    BorderThickness="0,1,0,0"
+                    Padding="12,8"
+                    Cursor="Hand"
+                    MouseLeftButtonUp="TrayHint_Dismiss">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <TextBlock Grid.Column="0"
+                               Text="💡"
+                               FontSize="13"
+                               VerticalAlignment="Top"
+                               Margin="0,0,8,0"/>
+
+                    <TextBlock Grid.Column="1"
+                               Text="The × button closes to the system tray — the app keeps running. Right-click the tray icon to fully quit."
+                               Foreground="{StaticResource BrushTextMuted}"
+                               FontFamily="{StaticResource FontPrimary}"
+                               FontSize="{StaticResource FontSizeSmall}"
+                               TextWrapping="Wrap"/>
+
+                    <TextBlock Grid.Column="2"
+                               Text="Got it"
+                               Foreground="{StaticResource BrushPrimary}"
+                               FontFamily="{StaticResource FontPrimary}"
+                               FontSize="{StaticResource FontSizeSmall}"
+                               FontWeight="SemiBold"
+                               VerticalAlignment="Center"
+                               Margin="10,0,0,0"/>
+                </Grid>
             </Border>
 
         </StackPanel>
