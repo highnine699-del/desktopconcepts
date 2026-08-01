@@ -62,6 +62,12 @@ public partial class App : System.Windows.Application
                 // Model download service (local first-run)
                 services.AddHttpClient<ModelDownloadService>();
 
+                // Update checker with proper User-Agent for GitHub API
+                services.AddHttpClient("GitHubUpdate", client =>
+                {
+                    client.DefaultRequestHeaders.UserAgent.ParseAdd("DesktopConcepts-UpdateChecker/1.0");
+                });
+
                 // ── Application ───────────────────────────────────────────────
                 services.AddSingleton<WidgetStateManager>();
                 services.AddSingleton<DailyConceptScheduler>();

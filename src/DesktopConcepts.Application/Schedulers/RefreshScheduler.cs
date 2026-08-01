@@ -64,8 +64,7 @@ public sealed class RefreshScheduler : BackgroundService
             var currentVersion = GetCurrentVersion();
             _logger.LogDebug("Checking for updates (current version: {Version})", currentVersion);
 
-            using var http = _httpFactory.CreateClient();
-            http.DefaultRequestHeaders.UserAgent.ParseAdd("DesktopConcepts/" + currentVersion);
+            using var http = _httpFactory.CreateClient("GitHubUpdate");
 
             // GitHub API: latest release for the correct repo
             const string apiUrl =
