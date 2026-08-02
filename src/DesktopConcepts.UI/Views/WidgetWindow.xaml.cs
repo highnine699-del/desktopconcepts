@@ -9,6 +9,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
+using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Threading;
 using SysPath = System.IO.Path;
@@ -352,9 +353,6 @@ public partial class WidgetWindow : Window
     {
         var settings = await _settingsStore.LoadAsync(CancellationToken.None);
 
-        // Apply opacity
-        Opacity = Math.Clamp(settings.WidgetOpacity, 0.4, 1.0);
-
         // Apply position (saved or default top-right)
         if (settings.WidgetPosition is not null)
         {
@@ -366,6 +364,9 @@ public partial class WidgetWindow : Window
         {
             PositionTopRightDefault();
         }
+
+        // Apply opacity to background brush (not the window itself)
+        UpdateBackgroundOpacity(settings.WidgetOpacity);
     }
 
     private void PositionTopRightDefault()
@@ -375,6 +376,21 @@ public partial class WidgetWindow : Window
         Left = screen.Right - Width - margin;
         Top = margin;
         _logger.LogInformation("Set default top-right position: Left={Left}, Top={Top}", Left, Top);
+    }
+
+    private void UpdateBackgroundOpacity(double opacity)
+    {
+        var clampedOpacity = Math.Clamp(opacity, 0.4, 1.0);
+
+        // Convert 0.4-1.0 range to alpha byte (102-255)
+        var alpha = (byte)(clampedOpacity * 255);
+
+        // Get the background brush from resources
+        if (FindResource("BrushBackground") is SolidColorBrush backgroundBrush)
+        {
+            var currentColor = backgroundBrush.Color;
+            backgroundBrush.Color = Color.FromArgb(alpha, currentColor.R, currentColor.G, currentColor.B);
+        }
     }
 
     private void OnLocationChanged(object? sender, EventArgs e)
@@ -837,8 +853,8 @@ public partial class WidgetWindow : Window
     {
         var settings = await _settingsStore.LoadAsync(CancellationToken.None);
 
-        // Apply opacity
-        Opacity = Math.Clamp(settings.WidgetOpacity, 0.4, 1.0);
+        // Apply opacity to background brush
+        UpdateBackgroundOpacity(settings.WidgetOpacity);
 
         // Apply/restore WorkerW mode
         if (settings.PinBehindDesktopIcons)

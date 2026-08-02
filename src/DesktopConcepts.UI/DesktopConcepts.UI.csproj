@@ -9,7 +9,7 @@
     <AssemblyName>DesktopConcepts</AssemblyName>
     <RootNamespace>DesktopConcepts.UI</RootNamespace>
     <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
-    <Version>1.0.4</Version>
+    <Version>1.0.7</Version>
   </PropertyGroup>
 
   <ItemGroup>
@@ -24,6 +24,9 @@
   </ItemGroup>
 
 </Project>
+
+
+
 
 
 

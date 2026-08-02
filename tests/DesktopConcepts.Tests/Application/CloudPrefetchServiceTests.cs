@@ -80,6 +80,8 @@ public sealed class CloudPrefetchServiceTests
         public Task AppendSetAsync(DailyConceptSet s, CancellationToken ct) => Task.CompletedTask;
         public Task<IReadOnlyList<string>> GetRecentTitlesAsync(int c, CancellationToken ct)
             => Task.FromResult<IReadOnlyList<string>>([]);
+        public Task<DailyConceptSet?> GetMostRecentSetAsync(CancellationToken ct)
+            => Task.FromResult<DailyConceptSet?>(null);
     }
 
     private sealed class SeededHistory : IConceptHistoryStore
@@ -89,6 +91,8 @@ public sealed class CloudPrefetchServiceTests
         public Task AppendSetAsync(DailyConceptSet s, CancellationToken ct) => Task.CompletedTask;
         public Task<IReadOnlyList<string>> GetRecentTitlesAsync(int c, CancellationToken ct)
             => Task.FromResult<IReadOnlyList<string>>(_titles.Take(c).ToList());
+        public Task<DailyConceptSet?> GetMostRecentSetAsync(CancellationToken ct)
+            => Task.FromResult<DailyConceptSet?>(null);
     }
 
     private sealed class CloudModeSettings : ISettingsStore
@@ -254,7 +258,7 @@ public sealed class CloudPrefetchServiceTests
             NullLogger<DailyConceptScheduler>.Instance);
 
         var bgSvc = new TestableConceptGenerationBgService(
-            scheduler, prefetch, settings,
+            scheduler, prefetch, settings, history,
             NullLogger<ConceptGenerationBackgroundService>.Instance);
 
         Exception? captured = null;
@@ -279,9 +283,9 @@ public sealed class CloudPrefetchServiceTests
     {
         public TestableConceptGenerationBgService(
             DailyConceptScheduler s, CloudPrefetchService p,
-            ISettingsStore st,
+            ISettingsStore st, IConceptHistoryStore h,
             Microsoft.Extensions.Logging.ILogger<ConceptGenerationBackgroundService> l)
-            : base(s, p, st, l) { }
+            : base(s, p, st, h, l) { }
 
         protected override bool ShouldSkipToday() => false;
     }

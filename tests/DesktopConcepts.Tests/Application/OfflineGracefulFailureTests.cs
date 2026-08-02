@@ -31,6 +31,8 @@ public sealed class OfflineGracefulFailureTests
         public Task AppendSetAsync(DailyConceptSet s, CancellationToken ct) => Task.CompletedTask;
         public Task<IReadOnlyList<string>> GetRecentTitlesAsync(int c, CancellationToken ct)
             => Task.FromResult<IReadOnlyList<string>>([]);
+        public Task<DailyConceptSet?> GetMostRecentSetAsync(CancellationToken ct)
+            => Task.FromResult<DailyConceptSet?>(null);
     }
 
     private sealed class LocalModeSettings : ISettingsStore
@@ -120,5 +122,7 @@ public sealed class OfflineGracefulFailureTests
         }
         public Task<IReadOnlyList<string>> GetRecentTitlesAsync(int c, CancellationToken ct)
             => Task.FromResult<IReadOnlyList<string>>([]);
+        public Task<DailyConceptSet?> GetMostRecentSetAsync(CancellationToken ct)
+            => Task.FromResult<DailyConceptSet?>(null);
     }
 }

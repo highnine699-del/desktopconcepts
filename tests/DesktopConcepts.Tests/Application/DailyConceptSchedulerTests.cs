@@ -47,6 +47,9 @@ public sealed class DailyConceptSchedulerTests
 
         public Task<IReadOnlyList<string>> GetRecentTitlesAsync(int count, CancellationToken ct)
             => Task.FromResult<IReadOnlyList<string>>(["OldTitle1", "OldTitle2"]);
+
+        public Task<DailyConceptSet?> GetMostRecentSetAsync(CancellationToken ct)
+            => Task.FromResult(AppendedSets.LastOrDefault());
     }
 
     private sealed class FakeSettings : ISettingsStore

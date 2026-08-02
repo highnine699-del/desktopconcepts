@@ -26,6 +26,7 @@ public class ConceptGenerationBackgroundService : BackgroundService
     private readonly DailyConceptScheduler  _scheduler;
     private readonly CloudPrefetchService   _prefetch;
     private readonly ISettingsStore         _settings;
+    private readonly IConceptHistoryStore   _historyStore;
     private readonly ILogger<ConceptGenerationBackgroundService> _logger;
 
     // Raised for both modes when a set is ready — WidgetWindow subscribes to this
@@ -47,11 +48,13 @@ public class ConceptGenerationBackgroundService : BackgroundService
         DailyConceptScheduler  scheduler,
         CloudPrefetchService   prefetch,
         ISettingsStore         settings,
+        IConceptHistoryStore   historyStore,
         ILogger<ConceptGenerationBackgroundService> logger)
     {
         _scheduler = scheduler;
         _prefetch  = prefetch;
         _settings  = settings;
+        _historyStore = historyStore;
         _logger    = logger;
 
         // Forward DailyConceptScheduler events (local mode)
@@ -97,7 +100,21 @@ public class ConceptGenerationBackgroundService : BackgroundService
             }
             else
             {
-                _logger.LogInformation("Already ran for {Today}. Sleeping until tomorrow.", today);
+                _logger.LogInformation("Already ran for {Today}. Loading today's concept set from history.", today);
+
+                // Load today's already-generated set from history
+                var recentSet = await _historyStore.GetMostRecentSetAsync(stoppingToken);
+                if (recentSet is not null)
+                {
+                    _logger.LogInformation("Loaded concept set for {Date} from history.", recentSet.Date);
+                    ConceptSetReady?.Invoke(recentSet);
+                }
+                else
+                {
+                    _logger.LogWarning("No concept set found in history for {Today}.", today);
+                }
+
+                _logger.LogInformation("Sleeping until tomorrow.");
             }
 
             // Sleep until 1 minute after next midnight

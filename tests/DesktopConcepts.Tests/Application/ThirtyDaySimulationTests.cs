@@ -52,6 +52,9 @@ public sealed class ThirtyDaySimulationTests
         public Task<IReadOnlyList<string>> GetRecentTitlesAsync(int count, CancellationToken ct)
             => Task.FromResult<IReadOnlyList<string>>(_allTitles.TakeLast(count).ToList());
 
+        public Task<DailyConceptSet?> GetMostRecentSetAsync(CancellationToken ct)
+            => Task.FromResult<DailyConceptSet?>(null);
+
         public IReadOnlyList<string> All => _allTitles.AsReadOnly();
     }
 
