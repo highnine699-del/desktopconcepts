@@ -51,11 +51,11 @@ public class ConceptGenerationBackgroundService : BackgroundService
         IConceptHistoryStore   historyStore,
         ILogger<ConceptGenerationBackgroundService> logger)
     {
-        _scheduler = scheduler;
-        _prefetch  = prefetch;
-        _settings  = settings;
+        _scheduler    = scheduler;
+        _prefetch     = prefetch;
+        _settings     = settings;
         _historyStore = historyStore;
-        _logger    = logger;
+        _logger       = logger;
 
         // Forward DailyConceptScheduler events (local mode)
         // QuotaExceededException is intercepted here before GenerationFailed
@@ -136,6 +136,11 @@ public class ConceptGenerationBackgroundService : BackgroundService
         if (set is not null)
         {
             _logger.LogInformation("Consumed buffered set for {Date}.", set.Date);
+
+            // Persist to History.md so on restart the set can be reloaded without
+            // touching the buffer or the network again.
+            await _historyStore.AppendSetAsync(set, cancellationToken);
+
             ConceptSetReady?.Invoke(set);
         }
         else
@@ -148,6 +153,7 @@ public class ConceptGenerationBackgroundService : BackgroundService
                 var freshSet = await _prefetch.TryConsumeAsync(cancellationToken);
                 if (freshSet is not null)
                 {
+                    await _historyStore.AppendSetAsync(freshSet, cancellationToken);
                     ConceptSetReady?.Invoke(freshSet);
                     return;
                 }
