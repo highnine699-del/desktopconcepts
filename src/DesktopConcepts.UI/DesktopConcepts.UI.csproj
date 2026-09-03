@@ -10,6 +10,18 @@
     <RootNamespace>DesktopConcepts.UI</RootNamespace>
     <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
     <Version>1.0.8</Version>
+
+    <!-- Assembly metadata — shown in file properties, improves AV reputation heuristics -->
+    <Company>DesktopConcepts</Company>
+    <Product>DesktopConcepts</Product>
+    <Copyright>Copyright © 2026 DesktopConcepts</Copyright>
+    <AssemblyVersion>1.0.8.0</AssemblyVersion>
+    <FileVersion>1.0.8.0</FileVersion>
+    <InformationalVersion>1.0.8</InformationalVersion>
+    <Description>Daily AI-generated technical concepts for your desktop</Description>
+
+    <!-- Explicit app manifest — tells Windows this is a normal user-mode GUI app -->
+    <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
 
   <ItemGroup>
@@ -24,11 +36,3 @@
   </ItemGroup>
 
 </Project>
-
-
-
-
-
-
-
-

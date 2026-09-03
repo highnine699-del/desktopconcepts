@@ -33,7 +33,8 @@
                         CenterX="160" CenterY="0"/>
     </Window.RenderTransform>
 
-    <Border Background="{StaticResource BrushBackground}"
+    <Border x:Name="RootBorder"
+            Background="{StaticResource BrushBackground}"
             BorderBrush="{StaticResource BrushBorder}"
             BorderThickness="1"
             CornerRadius="{StaticResource RadiusCard}"

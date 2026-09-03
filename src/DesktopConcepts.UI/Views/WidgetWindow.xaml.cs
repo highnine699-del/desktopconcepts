@@ -380,17 +380,9 @@ public partial class WidgetWindow : Window
 
     private void UpdateBackgroundOpacity(double opacity)
     {
-        var clampedOpacity = Math.Clamp(opacity, 0.4, 1.0);
-
-        // Convert 0.4-1.0 range to alpha byte (102-255)
-        var alpha = (byte)(clampedOpacity * 255);
-
-        // Get the background brush from resources
-        if (FindResource("BrushBackground") is SolidColorBrush backgroundBrush)
-        {
-            var currentColor = backgroundBrush.Color;
-            backgroundBrush.Color = Color.FromArgb(alpha, currentColor.R, currentColor.G, currentColor.B);
-        }
+        // Set Opacity on the root Border element — never mutate a frozen resource brush.
+        // WPF resource brushes are frozen after XAML load; writing .Color throws InvalidOperationException.
+        RootBorder.Opacity = Math.Clamp(opacity, 0.4, 1.0);
     }
 
     private void OnLocationChanged(object? sender, EventArgs e)
@@ -968,6 +960,15 @@ public partial class WidgetWindow : Window
         => WpfApp.Current.Shutdown();
 
     // ── Fix 1: Close-to-tray + tray hint ─────────────────────────────────────
+
+    /// <summary>
+    /// Called by SettingsWindow opacity slider for live preview.
+    /// Sets Opacity on the root Border — never mutates a frozen resource brush.
+    /// </summary>
+    public void SetBackgroundOpacity(double opacity)
+    {
+        RootBorder.Opacity = Math.Clamp(opacity, 0.4, 1.0);
+    }
 
     /// <summary>
     /// × button on both Compact and Expanded views.

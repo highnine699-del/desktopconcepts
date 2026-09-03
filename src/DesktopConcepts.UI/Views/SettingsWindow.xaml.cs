@@ -280,17 +280,12 @@ public partial class SettingsWindow : Window
     private void OpacitySlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
         UpdateOpacityText(e.NewValue);
-        // Apply live to widget window background brush if it's open
+
+        // Apply live preview to the widget window's background opacity.
+        // We set Opacity on the root Border rather than mutating a frozen resource brush.
         if (Owner is WidgetWindow widget)
         {
-            var clampedOpacity = Math.Clamp(e.NewValue, 0.4, 1.0);
-            var alpha = (byte)(clampedOpacity * 255);
-
-            if (widget.FindResource("BrushBackground") is SolidColorBrush backgroundBrush)
-            {
-                var currentColor = backgroundBrush.Color;
-                backgroundBrush.Color = System.Windows.Media.Color.FromArgb(alpha, currentColor.R, currentColor.G, currentColor.B);
-            }
+            widget.SetBackgroundOpacity(Math.Clamp(e.NewValue, 0.4, 1.0));
         }
     }
 
