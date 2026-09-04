@@ -1,0 +1,20 @@
+<Project>
+  <!--
+    Directory.Build.props - applies to ALL projects in this solution.
+
+    Fixes SDK 10 trying to download net8.0 targeting packs when 8.0.29 is
+    already installed locally but 8.0.30 is the "latest". We pin the runtime
+    framework version so restore never demands a version not in the local cache.
+  -->
+  <PropertyGroup>
+    <!-- Pin exact runtime pack version to what is installed (8.0.29) -->
+    <RuntimeFrameworkVersion>8.0.29</RuntimeFrameworkVersion>
+
+    <!-- Valid values for SDK 10: direct, all. 'direct' only audits direct deps. -->
+    <NuGetAuditMode>direct</NuGetAuditMode>
+
+    <!-- Suppress source link to avoid extra network calls during build -->
+    <EnableSourceLink>false</EnableSourceLink>
+    <EmbedUntrackedSources>false</EmbedUntrackedSources>
+  </PropertyGroup>
+</Project>

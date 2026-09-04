@@ -26,6 +26,7 @@ public partial class SettingsWindow : Window
     private bool    _advancedExpanded;
     private bool    _apiKeyVisible;
     private string? _pendingModeOverride;
+    private bool    _isClosed;          // guards against Close() after window is already disposed
 
     public SettingsWindow(ISettingsStore settingsStore, ILogger<SettingsWindow> logger)
     {
@@ -40,6 +41,12 @@ public partial class SettingsWindow : Window
     /// Used by SkipToCloud_Click so the Cloud section is immediately visible.
     /// </summary>
     public void PreSelectMode(string mode) => _pendingModeOverride = mode;
+
+    protected override void OnClosed(EventArgs e)
+    {
+        _isClosed = true;
+        base.OnClosed(e);
+    }
 
     // ── Load ──────────────────────────────────────────────────────────────────
 
@@ -263,7 +270,7 @@ public partial class SettingsWindow : Window
             SaveStatusText.Visibility = Visibility.Visible;
 
             await Task.Delay(2500);
-            Close();
+            if (!_isClosed) Close();
         }
         catch (Exception ex)
         {
@@ -279,10 +286,15 @@ public partial class SettingsWindow : Window
 
     private void OpacitySlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
+        // Guard: this event fires during XAML initialization (when the Slider's default Value
+        // is applied) before InitializeComponent fully populates named elements.
+        // OpacityValueText may be null at that point — skip the update safely.
+        if (OpacityValueText is null) return;
+
         UpdateOpacityText(e.NewValue);
 
-        // Apply live preview to the widget window's background opacity.
-        // We set Opacity on the root Border rather than mutating a frozen resource brush.
+        // Live preview: Owner is null until ShowDialog is called, so the
+        // pattern-match is already null-safe — no explicit null check needed.
         if (Owner is WidgetWindow widget)
         {
             widget.SetBackgroundOpacity(Math.Clamp(e.NewValue, 0.4, 1.0));

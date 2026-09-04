@@ -2,7 +2,6 @@ using DesktopConcepts.Application;
 using DesktopConcepts.Application.Schedulers;
 using DesktopConcepts.Domain;
 using DesktopConcepts.Infrastructure.AI;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using System.Diagnostics;
 using System.IO;
@@ -48,6 +47,8 @@ public partial class WidgetWindow : Window
     private static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam, SendMessageTimeoutFlags fuFlags, uint uTimeout, out IntPtr lpdwResult);
     [DllImport("user32.dll", SetLastError = true)]
     private static extern IntPtr GetDesktopWindow();
+    [DllImport("user32.dll", SetLastError = true, EntryPoint = "GetParent")]
+    private static extern IntPtr GetParentWin32(IntPtr hWnd);
 
     [Flags]
     private enum SendMessageTimeoutFlags : uint
@@ -72,44 +73,52 @@ public partial class WidgetWindow : Window
     private const long LowRamThresholdBytes = 4L * 1024 * 1024 * 1024; // 4 GB
 
     // ── Dependencies ─────────────────────────────────────────────────────────
-    private readonly WidgetStateManager     _stateManager;
-    private readonly DailyConceptScheduler  _dailyScheduler;
-    private readonly RotationScheduler      _rotationScheduler;
-    private readonly ModelDownloadService   _downloadService;
-    private readonly CloudPrefetchService   _prefetchService;
-    private readonly ISettingsStore         _settingsStore;
-    private readonly IServiceProvider       _services;
-    private readonly ILogger<WidgetWindow>  _logger;
+    private readonly WidgetStateManager                    _stateManager;
+    private readonly DailyConceptScheduler                 _dailyScheduler;
+    private readonly RotationScheduler                     _rotationScheduler;
+    private readonly ModelDownloadService                  _downloadService;
+    private readonly CloudPrefetchService                  _prefetchService;
+    private readonly ConceptGenerationBackgroundService    _bgService;
+    private readonly RefreshScheduler                      _refreshScheduler;
+    private readonly ISettingsStore                        _settingsStore;
+    private readonly Func<SettingsWindow>                  _settingsWindowFactory;
+    private readonly ILogger<WidgetWindow>                 _logger;
 
     // ── Runtime state ────────────────────────────────────────────────────────
-    private Concept?        _currentConcept;
-    private int             _currentIndex;      // mirrors RotationScheduler index (0-2)
-    private DispatcherTimer? _expandedTimer;    // fires Timeout trigger after 30 s
+    private Concept?          _currentConcept;
+    private int               _currentIndex;          // mirrors RotationScheduler index (0-2)
+    private string?           _pendingUpdateUrl;       // set when UpdateAvailable fires
+    private AppSettings?      _cachedSettings;         // last loaded settings — avoids disk reads on drag
+    private DispatcherTimer?  _expandedTimer;          // fires Timeout trigger after 30 s
     private CancellationTokenSource? _downloadCts;
-    private TrayIcon?       _trayIcon;
-    private Point           _dragStartPoint;    // for distinguishing click vs drag
-    private DispatcherTimer? _positionSaveTimer; // debounced position save
-    private DispatcherTimer? _workerWWatchdog;  // checks WorkerW parent every 30s
-    private IntPtr?         _originalParent;    // saved for restoring normal behavior
+    private TrayIcon?         _trayIcon;
+    private Point             _dragStartPoint;         // for distinguishing click vs drag
+    private DispatcherTimer?  _positionSaveTimer;      // debounced position save
+    private DispatcherTimer?  _workerWWatchdog;        // checks WorkerW parent every 30 s
+    private IntPtr?           _originalParent;         // saved for restoring normal behavior
 
     public WidgetWindow(
-        WidgetStateManager    stateManager,
-        DailyConceptScheduler dailyScheduler,
-        RotationScheduler     rotationScheduler,
-        ModelDownloadService  downloadService,
-        CloudPrefetchService  prefetchService,
-        ISettingsStore        settingsStore,
-        IServiceProvider      services,
-        ILogger<WidgetWindow> logger)
+        WidgetStateManager                 stateManager,
+        DailyConceptScheduler              dailyScheduler,
+        RotationScheduler                  rotationScheduler,
+        ModelDownloadService               downloadService,
+        CloudPrefetchService               prefetchService,
+        ConceptGenerationBackgroundService bgService,
+        RefreshScheduler                   refreshScheduler,
+        ISettingsStore                     settingsStore,
+        Func<SettingsWindow>               settingsWindowFactory,
+        ILogger<WidgetWindow>              logger)
     {
-        _stateManager      = stateManager;
-        _dailyScheduler    = dailyScheduler;
-        _rotationScheduler = rotationScheduler;
-        _downloadService   = downloadService;
-        _prefetchService   = prefetchService;
-        _settingsStore     = settingsStore;
-        _services          = services;
-        _logger            = logger;
+        _stateManager          = stateManager;
+        _dailyScheduler        = dailyScheduler;
+        _rotationScheduler     = rotationScheduler;
+        _downloadService       = downloadService;
+        _prefetchService       = prefetchService;
+        _bgService             = bgService;
+        _refreshScheduler      = refreshScheduler;
+        _settingsStore         = settingsStore;
+        _settingsWindowFactory = settingsWindowFactory;
+        _logger                = logger;
 
         InitializeComponent();
 
@@ -351,13 +360,14 @@ public partial class WidgetWindow : Window
 
     private async Task ApplyPositionAndOpacityAsync()
     {
-        var settings = await _settingsStore.LoadAsync(CancellationToken.None);
+        var settings     = await _settingsStore.LoadAsync(CancellationToken.None);
+        _cachedSettings  = settings;  // warm the cache so drag saves never need a load
 
         // Apply position (saved or default top-right)
         if (settings.WidgetPosition is not null)
         {
             Left = settings.WidgetPosition.Left;
-            Top = settings.WidgetPosition.Top;
+            Top  = settings.WidgetPosition.Top;
             _logger.LogInformation("Restored saved position: Left={Left}, Top={Top}", Left, Top);
         }
         else
@@ -400,11 +410,15 @@ public partial class WidgetWindow : Window
 
     private async Task SavePositionAsync()
     {
-        var current = await _settingsStore.LoadAsync(CancellationToken.None);
-        var updated = current with
-        {
-            WidgetPosition = new WindowPosition(Left, Top)
-        };
+        // Use the cached settings snapshot to avoid a disk read on every drag tick.
+        // If no cache exists yet (shouldn't happen after ApplyPositionAndOpacityAsync),
+        // fall back to a full load.
+        var current = _cachedSettings ?? await _settingsStore.LoadAsync(CancellationToken.None);
+        var updated = current with { WidgetPosition = new WindowPosition(Left, Top) };
+
+        // Update the cache so subsequent saves also avoid disk reads
+        _cachedSettings = updated;
+
         await _settingsStore.SaveAsync(updated, CancellationToken.None);
         _logger.LogDebug("Saved position: Left={Left}, Top={Top}", Left, Top);
     }
@@ -447,7 +461,7 @@ public partial class WidgetWindow : Window
         if (!settings.PinBehindDesktopIcons) return;
 
         var hwnd = new WindowInteropHelper(this).Handle;
-        _originalParent = GetParent(hwnd);
+        _originalParent = GetParentWin32(hwnd);
 
         if (await TrySetWorkerWParentAsync(hwnd))
         {
@@ -458,11 +472,6 @@ public partial class WidgetWindow : Window
         {
             _logger.LogWarning("Failed to find WorkerW window — falling back to normal always-on-top behavior.");
         }
-    }
-
-    private IntPtr GetParent(IntPtr hWnd)
-    {
-        return GetWindowLong(hWnd, -8); // GWL_HWNDPARENT = -8
     }
 
     private async Task<bool> TrySetWorkerWParentAsync(IntPtr hwnd)
@@ -519,7 +528,7 @@ public partial class WidgetWindow : Window
             }
 
             var hwnd = new WindowInteropHelper(this).Handle;
-            var currentParent = GetParent(hwnd);
+            var currentParent = GetParentWin32(hwnd);
             var workerW = FindWorkerW();
 
             if (workerW == IntPtr.Zero || currentParent != workerW)
@@ -592,6 +601,16 @@ public partial class WidgetWindow : Window
     protected override void OnDeactivated(EventArgs e)
     {
         base.OnDeactivated(e);
+
+        // Don't collapse when a child/owned window (e.g. SettingsWindow) takes focus.
+        // OwnedWindows contains any window whose Owner is set to this WidgetWindow.
+        // When Settings opens it deactivates us — firing OutsideClick would immediately
+        // collapse the widget and look broken when Settings closes.
+        foreach (Window owned in OwnedWindows)
+        {
+            if (owned.IsVisible) return;
+        }
+
         _stateManager.Fire(WidgetTrigger.OutsideClick);
     }
 
@@ -757,6 +776,37 @@ public partial class WidgetWindow : Window
         });
     }
 
+    /// <summary>
+    /// Called when RefreshScheduler detects a newer version on GitHub.
+    /// Shows the update consent banner — nothing is downloaded automatically.
+    /// </summary>
+    public void OnUpdateAvailable(string version, string downloadUrl)
+    {
+        _logger.LogInformation("Update available: v{Version}. Showing consent banner.", version);
+        _pendingUpdateUrl = downloadUrl;
+        Dispatcher.Invoke(() =>
+        {
+            UpdateBannerText.Text   = $"Version {version} is available.";
+            UpdateBanner.Visibility = Visibility.Visible;
+        });
+    }
+
+    private void UpdateNow_Click(object sender, RoutedEventArgs e)
+    {
+        UpdateBanner.Visibility = Visibility.Collapsed;
+        var url = _pendingUpdateUrl;
+        _pendingUpdateUrl = null;
+        if (url is null) return;
+        _logger.LogInformation("User consented to update. Starting download.");
+        _ = Task.Run(() => _refreshScheduler.PerformUpdateAsync(url, CancellationToken.None));
+    }
+
+    private void UpdateLater_Click(object sender, RoutedEventArgs e)
+    {
+        UpdateBanner.Visibility = Visibility.Collapsed;
+        _logger.LogInformation("User deferred update to next check cycle.");
+    }
+
     private void OnConceptRotated(Concept concept)
     {
         Dispatcher.Invoke(() =>
@@ -826,16 +876,15 @@ public partial class WidgetWindow : Window
             }
             else
             {
-                await _dailyScheduler.RunIfDueAsync(
-                    DateOnly.FromDateTime(DateTime.Now), CancellationToken.None);
+                // ForceRetryAsync bypasses the already-ran-today guard — correct for a retry
+                await _bgService.ForceRetryAsync(CancellationToken.None);
             }
         });
     }
 
     private void OpenSettings_Click(object sender, RoutedEventArgs e)
     {
-        // Resolve a fresh SettingsWindow from DI (transient) and show it
-        var settingsWin = _services.GetRequiredService<SettingsWindow>();
+        var settingsWin = _settingsWindowFactory();
         settingsWin.Owner = this;
         settingsWin.Closed += async (_, _) => await ReapplySettingsAsync();
         settingsWin.ShowDialog();
@@ -843,7 +892,8 @@ public partial class WidgetWindow : Window
 
     private async Task ReapplySettingsAsync()
     {
-        var settings = await _settingsStore.LoadAsync(CancellationToken.None);
+        var settings    = await _settingsStore.LoadAsync(CancellationToken.None);
+        _cachedSettings = settings;  // keep cache in sync after user saves settings
 
         // Apply opacity to background brush
         UpdateBackgroundOpacity(settings.WidgetOpacity);
@@ -887,7 +937,7 @@ public partial class WidgetWindow : Window
 
         // Open the real Settings window with Cloud mode pre-selected so the user
         // can enter their API key immediately — no JSON editing required.
-        var settingsWin = _services.GetRequiredService<SettingsWindow>();
+        var settingsWin = _settingsWindowFactory();
         settingsWin.PreSelectMode("cloud");
         settingsWin.Owner = this;
         settingsWin.ShowDialog();

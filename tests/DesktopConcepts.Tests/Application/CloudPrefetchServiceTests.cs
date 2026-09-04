@@ -61,6 +61,10 @@ public sealed class CloudPrefetchServiceTests
         public Task<IReadOnlyList<DateOnly>> PeekDatesAsync(CancellationToken ct)
             => Task.FromResult<IReadOnlyList<DateOnly>>(_queue.Select(s => s.Date).ToList());
 
+        public Task<IReadOnlyList<Concept>> PeekConceptsAsync(CancellationToken ct)
+            => Task.FromResult<IReadOnlyList<Concept>>(
+                _queue.SelectMany(s => s.Concepts).ToList());
+
         public void Seed(int days)
         {
             var today = DateOnly.FromDateTime(DateTime.Today);

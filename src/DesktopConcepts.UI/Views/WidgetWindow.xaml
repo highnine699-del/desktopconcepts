@@ -42,6 +42,42 @@
 
         <StackPanel>
 
+            <!-- ══ UPDATE AVAILABLE BANNER ═══════════════════════════════
+                 Shown when RefreshScheduler detects a newer GitHub release.
+                 User must click "Update Now" to consent before install runs.
+            ════════════════════════════════════════════════════════════ -->
+            <Border x:Name="UpdateBanner"
+                    Visibility="Collapsed"
+                    Background="{StaticResource BrushAccent}"
+                    CornerRadius="6"
+                    Margin="8,8,8,0"
+                    Padding="10,8">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock x:Name="UpdateBannerText"
+                               Grid.Column="0"
+                               Text="A new version is available."
+                               Foreground="{StaticResource BrushBackground}"
+                               FontFamily="{StaticResource FontPrimary}"
+                               FontSize="{StaticResource FontSizeSmall}"
+                               VerticalAlignment="Center"
+                               TextWrapping="Wrap"/>
+                    <Button Grid.Column="1"
+                            Content="Update Now"
+                            Margin="6,0,4,0"
+                            Click="UpdateNow_Click"
+                            Style="{StaticResource ButtonPrimary}"/>
+                    <Button Grid.Column="2"
+                            Content="Later"
+                            Click="UpdateLater_Click"
+                            Style="{StaticResource ButtonBase}"/>
+                </Grid>
+            </Border>
+
             <!-- ══ SETUP CHOICE VIEW (first-run mode selection) ═════════
                  Shown before any other panel when IsFirstRun = true.
                  User picks Local or Cloud; code-behind sets AppSettings.Mode,

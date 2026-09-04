@@ -104,6 +104,20 @@ public sealed class JsonConceptBufferStore : IConceptBufferStore
         finally { _lock.Release(); }
     }
 
+    public async Task<IReadOnlyList<Concept>> PeekConceptsAsync(CancellationToken cancellationToken)
+    {
+        await _lock.WaitAsync(cancellationToken);
+        try
+        {
+            var buffer = await LoadBufferAsync(cancellationToken);
+            return buffer.Entries
+                .SelectMany(e => e.Concepts.Select(c => c.ToDomain()))
+                .ToList()
+                .AsReadOnly();
+        }
+        finally { _lock.Release(); }
+    }
+
     // ── Private helpers ───────────────────────────────────────────────────────
 
     private async Task<BufferFile> LoadBufferAsync(CancellationToken cancellationToken)

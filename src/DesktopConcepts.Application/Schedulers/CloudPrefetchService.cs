@@ -86,16 +86,24 @@ public class CloudPrefetchService
 
         var settings = await _settings.LoadAsync(cancellationToken);
 
-        // Build the combined avoid-list: history titles + all titles already in the buffer
+        // Build the combined avoid-list: history titles + all titles already in the buffer.
+        // Adding buffered titles prevents the new batch from repeating concepts that are
+        // already queued but not yet appended to History.md.
         var avoidList = new List<string>(
             await _history.GetRecentTitlesAsync(90, cancellationToken));
 
-        // Also avoid titles already buffered so the whole batch is duplicate-free
-        var bufferedDates = await _buffer.PeekDatesAsync(cancellationToken);
-        // (titles in the buffer are already in history once appended; this covers
-        //  the window between buffer-fill and the daily History.md write)
+        var bufferedConcepts = await _buffer.PeekConceptsAsync(cancellationToken);
+        foreach (var bc in bufferedConcepts)
+            avoidList.Add(bc.Title);
 
-        var startDate = DateOnly.FromDateTime(DateTime.Now).AddDays(current + 1);
+        _logger.LogDebug(
+            "Avoid-list: {HistoryCount} from history + {BufferCount} from buffer = {Total} total.",
+            avoidList.Count - bufferedConcepts.Count, bufferedConcepts.Count, avoidList.Count);
+
+        // startDate = today + current days.
+        // When buffer is empty (current=0), startDate = today so today's concept is slot 0.
+        // When buffer has 4 entries (current=4), startDate = today+4 so we top-up from day 4 onward.
+        var startDate = DateOnly.FromDateTime(DateTime.Now).AddDays(current);
         var newSets   = new List<DailyConceptSet>(needed);
 
         try
@@ -170,15 +178,31 @@ public class CloudPrefetchService
 
     // ── Private helpers ───────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Checks connectivity by sending an HTTP HEAD request to the proxy endpoint.
+    /// A DNS-only check always succeeds for Cloudflare-hosted Workers even when
+    /// the Worker itself is down — a real HTTP probe confirms the endpoint is up.
+    /// Times out after 5 seconds to keep the background refill non-blocking.
+    /// </summary>
     private static async Task<bool> IsInternetAvailableAsync(CancellationToken cancellationToken)
     {
         try
         {
-            // Resolve the proxy's own host — if this succeeds the Worker is reachable.
-            // Using the proxy host rather than a third-party domain means a positive result
-            // directly implies the default cloud endpoint is up, not just "internet exists".
-            var proxyHost = new Uri(AppSettings.DefaultProxyBaseUrl).Host;
-            await System.Net.Dns.GetHostAddressesAsync(proxyHost, cancellationToken);
+            // Use a short, separate HttpClient — not the injected provider client —
+            // so a timeout here doesn't interfere with ongoing concept generation requests.
+            using var cts  = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            cts.CancelAfter(TimeSpan.FromSeconds(5));
+
+            using var http = new HttpClient();
+            // HEAD to the proxy root — no body transferred, minimal quota impact.
+            // We only need a 2xx/3xx/4xx status; any HTTP response means the worker is up.
+            var response = await http.SendAsync(
+                new HttpRequestMessage(HttpMethod.Head, AppSettings.DefaultProxyBaseUrl),
+                HttpCompletionOption.ResponseHeadersRead,
+                cts.Token);
+
+            // Any HTTP response (even 4xx) means the host is reachable and responding.
+            // Only OperationCanceledException / HttpRequestException mean offline.
             return true;
         }
         catch

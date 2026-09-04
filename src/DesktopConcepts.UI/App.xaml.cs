@@ -50,22 +50,25 @@ public partial class App : System.Windows.Application
                 // ── Infrastructure ────────────────────────────────────────────
                 services.AddSingleton<ISettingsStore>(_ => settingsStore);
                 services.AddSingleton<IConceptHistoryStore, MarkdownHistoryStore>();
-
-                // Cloud prefetch buffer (cloud mode only — safe to register always,
-                // CloudPrefetchService and ConceptGenerationBackgroundService check Mode)
                 services.AddSingleton<IConceptBufferStore, JsonConceptBufferStore>();
 
                 // AI provider — generic OpenAI-compatible endpoint
-                // Provider now resolves settings dynamically via ISettingsStore
                 services.AddHttpClient<IConceptProvider, OpenAiCompatibleProvider>();
 
                 // Model download service (local first-run)
                 services.AddHttpClient<ModelDownloadService>();
 
-                // Update checker with proper User-Agent for GitHub API
+                // Update checker with GitHub API User-Agent header
                 services.AddHttpClient("GitHubUpdate", client =>
                 {
                     client.DefaultRequestHeaders.UserAgent.ParseAdd("DesktopConcepts-UpdateChecker/1.0");
+                });
+
+                // Download client for update installer — pre-configured with 10-minute timeout
+                // so RefreshScheduler.PerformUpdateAsync never sets Timeout on a live client
+                services.AddHttpClient("UpdateDownload", client =>
+                {
+                    client.Timeout = TimeSpan.FromMinutes(10);
                 });
 
                 // ── Application ───────────────────────────────────────────────
@@ -77,32 +80,52 @@ public partial class App : System.Windows.Application
                 // BackgroundService: drives daily delivery for both modes
                 services.AddHostedService<ConceptGenerationBackgroundService>();
 
-                // Auto-update check (24 h cadence)
-                services.AddHostedService<RefreshScheduler>();
+                // Auto-update check (24 h cadence, raises event for user consent).
+                // Register as an explicit singleton FIRST so the same instance is used
+                // both as a hosted service and as the direct injection into WidgetWindow.
+                // AddHostedService<T> alone creates an internal instance that can't be
+                // retrieved via GetRequiredService<RefreshScheduler>() — this pattern fixes that.
+                services.AddSingleton<RefreshScheduler>();
+                services.AddHostedService(sp => sp.GetRequiredService<RefreshScheduler>());
 
                 // ── UI ────────────────────────────────────────────────────────
                 services.AddSingleton<WidgetWindow>();
-                services.AddTransient<SettingsWindow>();  // transient: new instance each open
+                services.AddTransient<SettingsWindow>();
+
+                // Factory for SettingsWindow — avoids injecting IServiceProvider into WidgetWindow
+                services.AddSingleton<Func<SettingsWindow>>(
+                    sp => () => sp.GetRequiredService<SettingsWindow>());
             })
             .Build();
 
-        await _host.StartAsync();
-
-        var elapsedMs = Stopwatch.GetElapsedTime(processStart).TotalMilliseconds;
-        Log.Information("Host started in {ElapsedMs:F1} ms.", elapsedMs);
-
-        // Wire ConceptGenerationBackgroundService events → WidgetWindow
-        // The BackgroundService is the single source of truth for concept delivery
-        // in both modes; WidgetWindow subscribes through the registered singleton.
+        // ── Resolve services BEFORE StartAsync ────────────────────────────────
+        // Wiring events before StartAsync guarantees no delivery can be missed —
+        // background threads haven't started yet when we attach the handlers.
         var bgService = _host.Services
             .GetServices<IHostedService>()
             .OfType<ConceptGenerationBackgroundService>()
             .First();
 
+        var refreshScheduler = _host.Services
+            .GetServices<IHostedService>()
+            .OfType<RefreshScheduler>()
+            .First();
+
         var window = _host.Services.GetRequiredService<WidgetWindow>();
-        bgService.ConceptSetReady   += set => window.OnConceptSetReady(set);
-        bgService.GenerationFailed  += ex  => window.OnGenerationFailed(ex);
-        bgService.QuotaExceeded     += ()  => window.OnQuotaExceeded();
+
+        // Wire concept delivery events before the host starts
+        bgService.ConceptSetReady  += set => window.OnConceptSetReady(set);
+        bgService.GenerationFailed += ex  => window.OnGenerationFailed(ex);
+        bgService.QuotaExceeded    += ()  => window.OnQuotaExceeded();
+
+        // Wire update-available event so the UI shows consent banner, not silent install
+        refreshScheduler.UpdateAvailable += (ver, url) => window.OnUpdateAvailable(ver, url);
+
+        // ── Now safe to start — all subscriptions are in place ────────────────
+        await _host.StartAsync();
+
+        var elapsedMs = Stopwatch.GetElapsedTime(processStart).TotalMilliseconds;
+        Log.Information("Host started in {ElapsedMs:F1} ms.", elapsedMs);
 
         MainWindow = window;
         window.Show();

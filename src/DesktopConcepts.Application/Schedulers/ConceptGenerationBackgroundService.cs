@@ -139,7 +139,9 @@ public class ConceptGenerationBackgroundService : BackgroundService
 
             // Persist to History.md so on restart the set can be reloaded without
             // touching the buffer or the network again.
-            await _historyStore.AppendSetAsync(set, cancellationToken);
+            // Guard: only append if today's set is not already in history
+            // (prevents double-append on ForceRetry when a prior run succeeded).
+            await AppendIfNotAlreadyPersistedAsync(set, cancellationToken);
 
             ConceptSetReady?.Invoke(set);
         }
@@ -153,7 +155,7 @@ public class ConceptGenerationBackgroundService : BackgroundService
                 var freshSet = await _prefetch.TryConsumeAsync(cancellationToken);
                 if (freshSet is not null)
                 {
-                    await _historyStore.AppendSetAsync(freshSet, cancellationToken);
+                    await AppendIfNotAlreadyPersistedAsync(freshSet, cancellationToken);
                     ConceptSetReady?.Invoke(freshSet);
                     return;
                 }
@@ -173,6 +175,24 @@ public class ConceptGenerationBackgroundService : BackgroundService
         }
     }
 
+    /// <summary>
+    /// Appends <paramref name="set"/> to History.md only if today's entry is not
+    /// already present. Prevents duplicate history entries when ForceRetryAsync
+    /// is called after a set was already successfully generated and persisted.
+    /// </summary>
+    private async Task AppendIfNotAlreadyPersistedAsync(
+        DailyConceptSet set, CancellationToken cancellationToken)
+    {
+        var existing = await _historyStore.GetMostRecentSetAsync(cancellationToken);
+        if (existing?.Date == set.Date)
+        {
+            _logger.LogDebug(
+                "History already contains an entry for {Date} — skipping duplicate append.", set.Date);
+            return;
+        }
+        await _historyStore.AppendSetAsync(set, cancellationToken);
+    }
+
     // ── Date persistence ──────────────────────────────────────────────────────
 
     /// <summary>
@@ -183,6 +203,25 @@ public class ConceptGenerationBackgroundService : BackgroundService
     {
         var today = DateOnly.FromDateTime(DateTime.Now);
         return AlreadyRanToday(today);
+    }
+
+    /// <summary>
+    /// Explicitly re-runs the daily generation for today, bypassing the
+    /// <see cref="ShouldSkipToday"/> guard. Call this only from error-retry UI
+    /// paths — never from the normal daily schedule loop.
+    /// </summary>
+    public async Task ForceRetryAsync(CancellationToken cancellationToken)
+    {
+        var settings = await _settings.LoadAsync(cancellationToken);
+        var today    = DateOnly.FromDateTime(DateTime.Now);
+
+        _logger.LogInformation(
+            "ForceRetry: re-running generation for {Today} on user request.", today);
+
+        if (settings.Mode == "cloud")
+            await RunCloudDayAsync(today, cancellationToken);
+        else
+            await _scheduler.RunIfDueAsync(today, cancellationToken);
     }
 
     private static bool AlreadyRanToday(DateOnly today)

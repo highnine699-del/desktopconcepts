@@ -31,4 +31,11 @@ public interface IConceptBufferStore
     /// Used at fetch time so the prefetch batch doesn't assign duplicate dates.
     /// </summary>
     Task<IReadOnlyList<DateOnly>> PeekDatesAsync(CancellationToken cancellationToken);
+
+    /// <summary>
+    /// All concepts currently in the buffer without consuming them.
+    /// Used by <see cref="CloudPrefetchService"/> to add buffered titles to the
+    /// deduplication avoid-list so new batches never repeat already-buffered concepts.
+    /// </summary>
+    Task<IReadOnlyList<Concept>> PeekConceptsAsync(CancellationToken cancellationToken);
 }

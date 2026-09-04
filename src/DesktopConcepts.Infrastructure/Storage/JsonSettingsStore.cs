@@ -60,10 +60,30 @@ public sealed class JsonSettingsStore : ISettingsStore
 
     public async Task SaveAsync(AppSettings settings, CancellationToken cancellationToken)
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-        await using var stream = File.Create(_path);
-        await JsonSerializer.SerializeAsync(stream, settings, WriteOptions, cancellationToken);
-        _logger.LogInformation("Settings saved to {Path}.", _path);
+        var dir = Path.GetDirectoryName(_path)!;
+        Directory.CreateDirectory(dir);
+
+        // Write to a uniquely-named temp file, then atomically replace the real file.
+        // Prevents a mid-write crash leaving a corrupt (zero-byte / partial) Settings.json.
+        var tempPath = Path.Combine(dir, Path.GetRandomFileName());
+        try
+        {
+            await using (var stream = File.Create(tempPath))
+            {
+                await JsonSerializer.SerializeAsync(stream, settings, WriteOptions, cancellationToken);
+                await stream.FlushAsync(cancellationToken);
+            }
+
+            // File.Move with overwrite=true is the closest to atomic on Windows without
+            // transactional NTFS — the destination is never observed in a partial state.
+            File.Move(tempPath, _path, overwrite: true);
+            _logger.LogInformation("Settings saved to {Path}.", _path);
+        }
+        catch
+        {
+            try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch { /* best-effort cleanup */ }
+            throw;
+        }
     }
 }
 

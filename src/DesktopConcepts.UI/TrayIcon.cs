@@ -59,6 +59,9 @@ public sealed class TrayIcon : IDisposable
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
     private static extern bool Shell_NotifyIcon(uint dwMessage, ref NOTIFYICONDATA lpData);
 
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    private static extern IntPtr ExtractIcon(IntPtr hInst, string pszExeFileName, int nIconIndex);
+
     [DllImport("user32.dll")]
     private static extern IntPtr CreatePopupMenu();
 
@@ -81,6 +84,9 @@ public sealed class TrayIcon : IDisposable
     [DllImport("user32.dll")]
     private static extern IntPtr LoadIcon(IntPtr hInstance, IntPtr lpIconName);
 
+    [DllImport("user32.dll")]
+    private static extern bool DestroyIcon(IntPtr hIcon);
+
     [StructLayout(LayoutKind.Sequential)]
     private struct POINT { public int X, Y; }
 
@@ -92,6 +98,7 @@ public sealed class TrayIcon : IDisposable
     // ── State ────────────────────────────────────────────────────────────────
     private readonly Window  _window;
     private readonly IntPtr  _hwnd;
+    private readonly IntPtr  _hIcon;   // GDI icon handle — freed in Dispose
     private NOTIFYICONDATA   _nid;
     private bool             _disposed;
     private HwndSource?      _hwndSource;
@@ -108,15 +115,17 @@ public sealed class TrayIcon : IDisposable
         _hwndSource = HwndSource.FromHwnd(_hwnd);
         _hwndSource?.AddHook(WndProc);
 
+        _hIcon = LoadAppIcon();
+
         _nid = new NOTIFYICONDATA
         {
-            cbSize          = (uint)Marshal.SizeOf<NOTIFYICONDATA>(),
-            hWnd            = _hwnd,
-            uID             = 1,
-            uFlags          = NIF_MESSAGE | NIF_ICON | NIF_TIP,
+            cbSize           = (uint)Marshal.SizeOf<NOTIFYICONDATA>(),
+            hWnd             = _hwnd,
+            uID              = 1,
+            uFlags           = NIF_MESSAGE | NIF_ICON | NIF_TIP,
             uCallbackMessage = WM_TRAYICON,
-            hIcon           = LoadIcon(IntPtr.Zero, (IntPtr)32512), // IDI_APPLICATION
-            szTip           = "DesktopConcepts — daily tech concepts",
+            hIcon            = _hIcon,
+            szTip            = "DesktopConcepts — daily tech concepts",
         };
 
         Shell_NotifyIcon(NIM_ADD, ref _nid);
@@ -124,6 +133,30 @@ public sealed class TrayIcon : IDisposable
         // Set NOTIFYICON_VERSION_4 for proper taskbar positioning
         _nid.uVersion = NOTIFYICON_VERSION_4;
         Shell_NotifyIcon(NIM_SETVERSION, ref _nid);
+    }
+
+    // ── Icon loading ──────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Loads the first icon from the running executable so the tray shows the
+    /// DesktopConcepts icon instead of the generic Windows application icon.
+    /// Falls back to IDI_APPLICATION if the exe has no embedded icon.
+    /// </summary>
+    private static IntPtr LoadAppIcon()
+    {
+        try
+        {
+            var exePath = System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName;
+            if (!string.IsNullOrEmpty(exePath))
+            {
+                var icon = ExtractIcon(IntPtr.Zero, exePath, 0);
+                if (icon != IntPtr.Zero) return icon;
+            }
+        }
+        catch { /* fall through to generic icon */ }
+
+        // Fallback: generic Windows application icon (IDI_APPLICATION = 32512)
+        return LoadIcon(IntPtr.Zero, (IntPtr)32512);
     }
 
     // ── Win32 message pump hook ───────────────────────────────────────────────
@@ -189,5 +222,14 @@ public sealed class TrayIcon : IDisposable
         Shell_NotifyIcon(NIM_DELETE, ref _nid);
         _hwndSource?.RemoveHook(WndProc);
         _hwndSource = null;
+
+        // Free the GDI icon handle to prevent a handle leak on every app exit.
+        // IDI_APPLICATION (loaded via LoadIcon with hInstance=0) is a shared system icon
+        // and must NOT be destroyed — only icons loaded from the exe via ExtractIcon need freeing.
+        // We stored _hIcon at construction; if it came from ExtractIcon it is non-zero and unique.
+        if (_hIcon != IntPtr.Zero)
+        {
+            try { DestroyIcon(_hIcon); } catch { /* best-effort */ }
+        }
     }
 }

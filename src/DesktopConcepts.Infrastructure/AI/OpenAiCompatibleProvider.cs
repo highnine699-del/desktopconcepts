@@ -13,12 +13,22 @@ namespace DesktopConcepts.Infrastructure.AI;
 ///
 /// Error contract: this class throws on any failure (network, non-2xx, bad JSON).
 /// The Application layer catches, logs, and surfaces Retry/Settings UI.
+///
+/// Settings are loaded once per call to GenerateConceptAsync and cached for
+/// 30 seconds to avoid 21 disk reads during a cloud prefetch batch (7 days × 3 concepts).
 /// </summary>
 public sealed class OpenAiCompatibleProvider : IConceptProvider
 {
     private readonly HttpClient _http;
     private readonly ISettingsStore _settingsStore;
     private readonly ILogger<OpenAiCompatibleProvider> _logger;
+
+    // Settings cache — avoids a disk read on every concept generation call.
+    // 30-second TTL: short enough that a Settings save mid-run is picked up quickly,
+    // long enough to cover an entire 21-concept prefetch batch (which runs in < 60 s).
+    private ProviderSettings? _cachedSettings;
+    private DateTime _cacheExpiry = DateTime.MinValue;
+    private static readonly TimeSpan CacheTtl = TimeSpan.FromSeconds(30);
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -30,19 +40,27 @@ public sealed class OpenAiCompatibleProvider : IConceptProvider
         ISettingsStore settingsStore,
         ILogger<OpenAiCompatibleProvider> logger)
     {
-        _http = http;
+        _http          = http;
         _settingsStore = settingsStore;
-        _logger = logger;
+        _logger        = logger;
     }
 
     private async Task<ProviderSettings> GetEffectiveSettingsAsync(CancellationToken cancellationToken)
     {
-        var settings = await _settingsStore.LoadAsync(cancellationToken);
+        // Return cached settings if still fresh
+        if (_cachedSettings is not null && DateTime.UtcNow < _cacheExpiry)
+            return _cachedSettings;
+
+        var settings         = await _settingsStore.LoadAsync(cancellationToken);
         var providerSettings = settings.Mode == "cloud"
             ? settings.EffectiveCloudProvider
             : settings.Provider;
 
-        _logger.LogInformation("Provider resolved: Mode={Mode}, BaseUrl={BaseUrl}, Model={Model}",
+        _cachedSettings = providerSettings;
+        _cacheExpiry    = DateTime.UtcNow + CacheTtl;
+
+        _logger.LogInformation(
+            "Provider resolved (cache miss): Mode={Mode}, BaseUrl={BaseUrl}, Model={Model}",
             settings.Mode, providerSettings.BaseUrl, providerSettings.Model);
 
         return providerSettings;
