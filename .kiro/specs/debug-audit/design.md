@@ -11,7 +11,7 @@ refactors beyond what is required to fix the bug.
 
 ## Design for REQ-C1: Fix MarkdownHistoryStore.GetMostRecentSetAsync
 
-**File:** `src/DesktopConcepts.Infrastructure/Storage/MarkdownHistoryStore.cs`
+**File:** `src/Quire.Infrastructure/Storage/MarkdownHistoryStore.cs`
 
 **Root cause:** The method computes concept positions as `startIndex + (i * 4)`. The actual
 file format written by `AppendSetAsync` is:
@@ -124,9 +124,9 @@ actual line index of each concept's heading as found by the initial scan.
 
 ## Design for REQ-C2: Fix Asset Name in RefreshScheduler
 
-**File:** `src/DesktopConcepts.Application/Schedulers/RefreshScheduler.cs`
+**File:** `src/Quire.Application/Schedulers/RefreshScheduler.cs`
 
-**Root cause:** Exact-match `"Setup.exe"` never matches `"DesktopConcepts-Setup.exe"`.
+**Root cause:** Exact-match `"Setup.exe"` never matches `"Quire-Setup.exe"`.
 
 **One-line fix in `DownloadAndInstallUpdateAsync`:**
 
@@ -137,21 +137,21 @@ var setupAsset = release.Assets?.FirstOrDefault(a =>
 
 // After (fixed):
 var setupAsset = release.Assets?.FirstOrDefault(a =>
-    a.Name?.Contains("DesktopConcepts-Setup", StringComparison.OrdinalIgnoreCase) == true
+    a.Name?.Contains("Quire-Setup", StringComparison.OrdinalIgnoreCase) == true
     && a.Name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase));
 ```
 
 Also update the log message to reflect the correct expected name:
 
 ```csharp
-_logger.LogWarning("Update available but no DesktopConcepts-Setup*.exe asset found in release.");
+_logger.LogWarning("Update available but no Quire-Setup*.exe asset found in release.");
 ```
 
 ---
 
 ## Design for REQ-C3: Delete config.json
 
-**File:** `src/DesktopConcepts.UI/config.json`
+**File:** `src/Quire.UI/config.json`
 
 Delete the file. It is never loaded by any code path. No other changes required.
 
@@ -159,7 +159,7 @@ Delete the file. It is never loaded by any code path. No other changes required.
 
 ## Design for REQ-H1 + REQ-H2: Fix Version Comparison in RefreshScheduler
 
-**File:** `src/DesktopConcepts.Application/Schedulers/RefreshScheduler.cs`
+**File:** `src/Quire.Application/Schedulers/RefreshScheduler.cs`
 
 Two bugs fixed together since they are in the same method.
 
@@ -222,7 +222,7 @@ private bool IsNewerVersion(string latest, string current)
 
 ## Design for REQ-H3: Fix GetParent Win32 P/Invoke in WidgetWindow
 
-**File:** `src/DesktopConcepts.UI/Views/WidgetWindow.xaml.cs`
+**File:** `src/Quire.UI/Views/WidgetWindow.xaml.cs`
 
 **Root cause:** Custom `GetParent` calls `GetWindowLong(hWnd, -8)` (owner handle) instead of
 the Win32 `GetParent` API (parent handle).
@@ -253,7 +253,7 @@ Replace `GetParent(hwnd)` call sites with `GetParentWin32(hwnd)`:
 
 ## Design for REQ-H4: Fix Event Wire-Up Race in App.xaml.cs
 
-**File:** `src/DesktopConcepts.UI/App.xaml.cs`
+**File:** `src/Quire.UI/App.xaml.cs`
 
 **Root cause:** Events are subscribed after `_host.StartAsync()`, which starts
 `ConceptGenerationBackgroundService` on a background thread.
@@ -287,9 +287,9 @@ await _host.StartAsync();
 ## Design for REQ-M1: Implement Buffer Deduplication in CloudPrefetchService
 
 **Files:**
-- `src/DesktopConcepts.Domain/IConceptBufferStore.cs` — add `PeekConceptsAsync`
-- `src/DesktopConcepts.Infrastructure/Storage/JsonConceptBufferStore.cs` — implement it
-- `src/DesktopConcepts.Application/Schedulers/CloudPrefetchService.cs` — use it
+- `src/Quire.Domain/IConceptBufferStore.cs` — add `PeekConceptsAsync`
+- `src/Quire.Infrastructure/Storage/JsonConceptBufferStore.cs` — implement it
+- `src/Quire.Application/Schedulers/CloudPrefetchService.cs` — use it
 
 **Step 1 — Add to `IConceptBufferStore`:**
 
@@ -346,7 +346,7 @@ correct, so no change needed there.
 
 ## Design for REQ-M2: Fix SettingsWindow Save_Click Close-After-Dispose
 
-**File:** `src/DesktopConcepts.UI/Views/SettingsWindow.xaml.cs`
+**File:** `src/Quire.UI/Views/SettingsWindow.xaml.cs`
 
 **Fix:** Add a `_isClosed` flag, set it in `OnClosed`, check it before `Close()`:
 
@@ -387,8 +387,8 @@ if (!_isClosed) Close();
 ## Design for REQ-M3: Fix HttpClient Timeout Registration
 
 **Files:**
-- `src/DesktopConcepts.UI/App.xaml.cs` — register named client with timeout
-- `src/DesktopConcepts.Application/Schedulers/RefreshScheduler.cs` — use named client, remove Timeout set
+- `src/Quire.UI/App.xaml.cs` — register named client with timeout
+- `src/Quire.Application/Schedulers/RefreshScheduler.cs` — use named client, remove Timeout set
 
 **In `App.xaml.cs` `ConfigureServices`:**
 
@@ -417,8 +417,8 @@ using var http = _httpFactory.CreateClient("UpdateDownload");
 ## Design for REQ-L1: Add ForceRetryAsync to ConceptGenerationBackgroundService
 
 **Files:**
-- `src/DesktopConcepts.Application/Schedulers/ConceptGenerationBackgroundService.cs`
-- `src/DesktopConcepts.UI/Views/WidgetWindow.xaml.cs`
+- `src/Quire.Application/Schedulers/ConceptGenerationBackgroundService.cs`
+- `src/Quire.UI/Views/WidgetWindow.xaml.cs`
 
 **Add to `ConceptGenerationBackgroundService`:**
 
@@ -465,7 +465,7 @@ await _bgService.ForceRetryAsync(CancellationToken.None);
 
 ## Design for REQ-L2: Fix TrayIcon to Use Application Icon
 
-**File:** `src/DesktopConcepts.UI/TrayIcon.cs`
+**File:** `src/Quire.UI/TrayIcon.cs`
 
 **Fix:** Use `ExtractIconEx` / `LoadImage` from the running executable instead of
 `IDI_APPLICATION`. The simplest reliable approach on Windows is `ExtractIcon`:
@@ -490,10 +490,10 @@ the tray icon still appears rather than failing silently.
 ## Design for REQ-L3: Update Flow — Event + Banner Instead of Silent Install
 
 **Files:**
-- `src/DesktopConcepts.Application/Schedulers/RefreshScheduler.cs` — raise event, don't install
-- `src/DesktopConcepts.UI/Views/WidgetWindow.xaml` — add UpdateBanner panel
-- `src/DesktopConcepts.UI/Views/WidgetWindow.xaml.cs` — subscribe to event, show banner
-- `src/DesktopConcepts.UI/App.xaml.cs` — wire UpdateAvailable event
+- `src/Quire.Application/Schedulers/RefreshScheduler.cs` — raise event, don't install
+- `src/Quire.UI/Views/WidgetWindow.xaml` — add UpdateBanner panel
+- `src/Quire.UI/Views/WidgetWindow.xaml.cs` — subscribe to event, show banner
+- `src/Quire.UI/App.xaml.cs` — wire UpdateAvailable event
 
 **`RefreshScheduler` changes:**
 
@@ -512,7 +512,7 @@ await DownloadAndInstallUpdateAsync(release, cancellationToken);
 
 // After:
 var setupAsset = release.Assets?.FirstOrDefault(a =>
-    a.Name?.Contains("DesktopConcepts-Setup", StringComparison.OrdinalIgnoreCase) == true
+    a.Name?.Contains("Quire-Setup", StringComparison.OrdinalIgnoreCase) == true
     && a.Name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase));
 
 if (setupAsset?.DownloadUrl is not null)
@@ -523,7 +523,7 @@ if (setupAsset?.DownloadUrl is not null)
 }
 else
 {
-    _logger.LogWarning("Update available but no DesktopConcepts-Setup*.exe asset found.");
+    _logger.LogWarning("Update available but no Quire-Setup*.exe asset found.");
 }
 ```
 
@@ -605,8 +605,8 @@ refreshScheduler.UpdateAvailable += (ver, url) => window.OnUpdateAvailable(ver, 
 ## Design for REQ-A1: Remove Service Locator from WidgetWindow
 
 **Files:**
-- `src/DesktopConcepts.UI/App.xaml.cs` — register factory
-- `src/DesktopConcepts.UI/Views/WidgetWindow.xaml.cs` — replace `IServiceProvider` with factory
+- `src/Quire.UI/App.xaml.cs` — register factory
+- `src/Quire.UI/Views/WidgetWindow.xaml.cs` — replace `IServiceProvider` with factory
 
 **In `App.xaml.cs` `ConfigureServices`:**
 

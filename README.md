@@ -1,4 +1,4 @@
-# DesktopConcepts
+# Quire
 
 A lightweight Windows desktop widget that delivers three AI-generated technical concepts every day, rotating through them every 7 minutes. Runs quietly in the system tray — always-on-top, no taskbar entry.
 
@@ -20,7 +20,7 @@ dotnet build
 ```
 
 ### 2. Configure
-On first run the app creates `%AppData%\DesktopConcepts\Settings.json` with defaults.  
+On first run the app creates `%AppData%\Quire\Settings.json` with defaults.  
 Edit it to point at your local AI server:
 
 ```json
@@ -44,7 +44,7 @@ Edit it to point at your local AI server:
 
 ### 3. Run
 ```powershell
-dotnet run --project src/DesktopConcepts.UI
+dotnet run --project src/Quire.UI
 ```
 
 The widget appears at the bottom-right of your screen.  
@@ -55,12 +55,12 @@ A tray icon appears in the system notification area — right-click it for optio
 ## Building a release binary
 
 ```powershell
-dotnet publish src/DesktopConcepts.UI/DesktopConcepts.UI.csproj `
+dotnet publish src/Quire.UI/Quire.UI.csproj `
   -p:PublishProfile=win-x64-release `
   -c Release
 ```
 
-Output: `publish/win-x64/DesktopConcepts.exe`  
+Output: `publish/win-x64/Quire.exe`  
 Single self-contained executable — no .NET runtime required on the target machine.
 
 ---
@@ -74,29 +74,29 @@ To create a proper Windows installer (Setup.exe) with Inno Setup:
 
 ### 1. Publish the application
 ```powershell
-dotnet publish src/DesktopConcepts.UI/DesktopConcepts.UI.csproj `
+dotnet publish src/Quire.UI/Quire.UI.csproj `
   -p:PublishProfile=win-x64-release `
   -c Release
 ```
 
 ### 2. Compile the installer
 ```powershell
-# Open installer/DesktopConcepts.iss in Inno Setup Compiler
+# Open installer/Quire.iss in Inno Setup Compiler
 # Or compile from command line:
-"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\DesktopConcepts.iss
+"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\Quire.iss
 ```
 
-Output: `installer/Output/DesktopConcepts-Setup.exe`
+Output: `installer/Output/Quire-Setup.exe`
 
 ### 3. Install and uninstall
-- **Install**: Run `DesktopConcepts-Setup.exe` — installs to `C:\Program Files\DesktopConcepts` by default
+- **Install**: Run `Quire-Setup.exe` — installs to `C:\Program Files\DesktopConcepts` by default
 - **Uninstall**: Use Windows "Add or Remove Programs" or run the uninstaller from the Start Menu
 
 **Installer options** (presented during installation):
 - Desktop shortcut (unchecked by default — this is a quiet widget)
 - Auto-start on Windows startup (checked by default — main use case)
 
-**Note on user data**: The installer does not delete `%AppData%\DesktopConcepts\` on uninstall. Your concepts, settings, and history are preserved. To clean them manually, delete that folder.
+**Note on user data**: The installer does not delete `%AppData%\Quire\` on uninstall. Your concepts, settings, and history are preserved. To clean them manually, delete that folder.
 
 ---
 
@@ -106,7 +106,7 @@ Output: `installer/Output/DesktopConcepts-Setup.exe`
 dotnet test
 ```
 
-All tests are in `tests/DesktopConcepts.Tests/`. No network or AI server needed — fakes cover everything.
+All tests are in `tests/Quire.Tests/`. No network or AI server needed — fakes cover everything.
 
 ---
 
@@ -128,22 +128,22 @@ All tests are in `tests/DesktopConcepts.Tests/`. No network or AI server needed 
 
 ```
 src/
-  DesktopConcepts.Domain/         Pure domain models and interfaces (no external deps)
-  DesktopConcepts.Application/    State machine, schedulers, background services
-  DesktopConcepts.Infrastructure/ AI provider, settings store, history store, download
-  DesktopConcepts.UI/             WPF widget, tray icon, theme, animations
+  Quire.Domain/         Pure domain models and interfaces (no external deps)
+  Quire.Application/    State machine, schedulers, background services
+  Quire.Infrastructure/ AI provider, settings store, history store, download
+  Quire.UI/             WPF widget, tray icon, theme, animations
 tests/
-  DesktopConcepts.Tests/          xUnit tests — Domain, Application, Infrastructure
+  Quire.Tests/          xUnit tests — Domain, Application, Infrastructure
 ```
 
 ---
 
 ## Data stored on disk
 
-Everything lives under `%AppData%\DesktopConcepts\` — nothing under `Program Files`.
+Everything lives under `%AppData%\Quire\` — nothing under `Program Files`.
 
 ```
-%AppData%\DesktopConcepts\
+%AppData%\Quire\
   Settings.json      — user configuration
   History.md         — append-only log of all generated concepts (3 per day)
   last_run.txt       — date of last successful generation (prevents re-running on same day)
@@ -151,7 +151,7 @@ Everything lives under `%AppData%\DesktopConcepts\` — nothing under `Program F
   Logs\              — rolling daily log files (14-day retention)
 ```
 
-Uninstalling is manual for v1: delete `%AppData%\DesktopConcepts\` and the exe.
+Uninstalling is manual for v1: delete `%AppData%\Quire\` and the exe.
 
 ---
 

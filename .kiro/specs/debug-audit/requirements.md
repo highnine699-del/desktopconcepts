@@ -31,19 +31,19 @@ that loads today's concepts from history silently displays wrong or incomplete c
 ## REQ-C2: RefreshScheduler Must Search for the Correct Installer Asset Name
 
 **Broken:** `DownloadAndInstallUpdateAsync` searches GitHub Release assets for a file named
-`"Setup.exe"`. The actual output file produced by InnoSetup is `"DesktopConcepts-Setup.exe"`.
+`"Setup.exe"`. The actual output file produced by InnoSetup is `"Quire-Setup.exe"`.
 The asset lookup always returns `null`, `_logger.LogWarning("no Setup.exe asset found")` fires,
 and the update is never installed — even when a newer version exists and the version check passes.
 
 **Required behaviour:**
-1. `RefreshScheduler` SHALL search for an asset whose name contains `"DesktopConcepts-Setup"` and
+1. `RefreshScheduler` SHALL search for an asset whose name contains `"Quire-Setup"` and
    ends with `".exe"` (case-insensitive), not an exact match on `"Setup.exe"`.
 
 ---
 
 ## REQ-C3: config.json Must Not Exist in the UI Project
 
-**Broken:** `config.json` in `DesktopConcepts.UI/` is never loaded by any code path. It contains
+**Broken:** `config.json` in `Quire.UI/` is never loaded by any code path. It contains
 a `CloudProvider` pointing to `api.anthropic.com / claude-haiku-4-5`, which contradicts the actual
 runtime default (the Groq Cloudflare Worker proxy). It misleads contributors into believing the
 cloud provider is Anthropic. No runtime behaviour depends on it.

@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>Quire</AssemblyName>
+    <RootNamespace>Quire.UI</RootNamespace>
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+    <Version>1.0.9</Version>
+
+    <!-- Assembly metadata — shown in file properties, improves AV reputation heuristics -->
+    <Company>Quire</Company>
+    <Product>Quire</Product>
+    <Copyright>Copyright © 2026 Quire</Copyright>
+    <AssemblyVersion>1.0.9.0</AssemblyVersion>
+    <FileVersion>1.0.9.0</FileVersion>
+    <InformationalVersion>1.0.9</InformationalVersion>
+    <Description>Daily AI-generated technical concepts for your desktop</Description>
+
+    <!-- Explicit app manifest — tells Windows this is a normal user-mode GUI app -->
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Quire.Application\Quire.Application.csproj" />
+    <ProjectReference Include="..\Quire.Infrastructure\Quire.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.1" />
+    <PackageReference Include="Serilog.Extensions.Hosting" Version="8.0.0" />
+    <PackageReference Include="Serilog.Sinks.File" Version="6.0.0" />
+  </ItemGroup>
+
+</Project>
+

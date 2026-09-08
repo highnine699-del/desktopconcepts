@@ -2,7 +2,7 @@
 
 ## Introduction
 
-DesktopConcepts is a lightweight Windows desktop widget (.NET 8, WPF) that delivers one AI-generated technical concept per day. The widget operates in three visible states (Compact, Expanded, Pinned) governed by a strict state machine. AI generation runs through a generic OpenAI-compatible HTTP endpoint, supporting local-first inference by default with an optional cloud upgrade. All data — settings, history, logs — resides in `%AppData%\DesktopConcepts`. The application must never crash on bad configuration or an offline AI provider, must start in under 300 ms, and must stay under 120 MB idle memory and near-zero idle CPU.
+DesktopConcepts is a lightweight Windows desktop widget (.NET 8, WPF) that delivers one AI-generated technical concept per day. The widget operates in three visible states (Compact, Expanded, Pinned) governed by a strict state machine. AI generation runs through a generic OpenAI-compatible HTTP endpoint, supporting local-first inference by default with an optional cloud upgrade. All data — settings, history, logs — resides in `%AppData%\Quire`. The application must never crash on bad configuration or an offline AI provider, must start in under 300 ms, and must stay under 120 MB idle memory and near-zero idle CPU.
 
 ---
 
@@ -106,10 +106,10 @@ DesktopConcepts is a lightweight Windows desktop widget (.NET 8, WPF) that deliv
 
 #### Acceptance Criteria
 
-1. THE SettingsStore SHALL read and write `Settings.json` at `%AppData%\DesktopConcepts\Settings.json`.
+1. THE SettingsStore SHALL read and write `Settings.json` at `%AppData%\Quire\Settings.json`.
 2. WHEN `Settings.json` does not exist, THE SettingsStore SHALL return `AppSettings.Default()` without throwing an exception.
 3. IF `Settings.json` is present but fails JSON deserialization for any reason, THEN THE SettingsStore SHALL rename the file to `Settings.json.bak`, return `AppSettings.Default()`, and SHALL NOT throw an exception to the caller.
-4. WHEN `SettingsStore.SaveAsync` is called, THE SettingsStore SHALL write to a temporary file first and then atomically replace `Settings.json`, using UTF-8 encoding without BOM, after creating the `%AppData%\DesktopConcepts` directory if it does not already exist.
+4. WHEN `SettingsStore.SaveAsync` is called, THE SettingsStore SHALL write to a temporary file first and then atomically replace `Settings.json`, using UTF-8 encoding without BOM, after creating the `%AppData%\Quire` directory if it does not already exist.
 5. FOR ALL valid `AppSettings` values, serializing then deserializing `Settings.json` SHALL produce an `AppSettings` where every public property, including nested objects, is equal by value to the original.
 
 ---
@@ -120,11 +120,11 @@ DesktopConcepts is a lightweight Windows desktop widget (.NET 8, WPF) that deliv
 
 #### Acceptance Criteria
 
-1. THE HistoryStore SHALL append each new Concept to `%AppData%\DesktopConcepts\History.md` in the format `\n## {GeneratedOn:yyyy-MM-dd} — {Title}\n*Category: {Category}*\n\n{Explanation}\n`, where `GeneratedOn` uses the UTC date at the time of the `AppendAsync` call.
+1. THE HistoryStore SHALL append each new Concept to `%AppData%\Quire\History.md` in the format `\n## {GeneratedOn:yyyy-MM-dd} — {Title}\n*Category: {Category}*\n\n{Explanation}\n`, where `GeneratedOn` uses the UTC date at the time of the `AppendAsync` call.
 2. WHEN `GetRecentTitlesAsync(count)` is called with a positive integer `count`, THE HistoryStore SHALL return the last `count` concept titles parsed from lines beginning with `## ` in `History.md`, ordered from oldest to newest by file appearance.
 3. WHEN `GetRecentTitlesAsync(count)` is called and `History.md` contains fewer than `count` entries, THE HistoryStore SHALL return all available titles without throwing an exception.
 4. WHEN `History.md` does not exist, THE HistoryStore SHALL return an empty list from `GetRecentTitlesAsync` without throwing an exception.
-5. IF the `%AppData%\DesktopConcepts` directory does not exist before an `AppendAsync` call, THEN THE HistoryStore SHALL create it without overwriting any existing file content.
+5. IF the `%AppData%\Quire` directory does not exist before an `AppendAsync` call, THEN THE HistoryStore SHALL create it without overwriting any existing file content.
 6. FOR ALL sequences of Concept values written via `AppendAsync`, calling `GetRecentTitlesAsync` with a count equal to the number of appended entries SHALL return all appended titles in the order they were written.
 7. WHEN an I/O exception occurs during `AppendAsync` or `GetRecentTitlesAsync`, THE HistoryStore SHALL propagate the exception to the caller and SHALL NOT leave a partial or corrupted entry in `History.md`.
 
@@ -178,7 +178,7 @@ DesktopConcepts is a lightweight Windows desktop widget (.NET 8, WPF) that deliv
 #### Acceptance Criteria
 
 1. THE Widget SHALL write log entries at four severity levels: Information, Warning, Error, and Critical.
-2. THE Widget SHALL write log files to `%AppData%\DesktopConcepts\Logs\` with one log file per calendar day and the filename pattern `log-{yyyy-MM-dd}.txt`.
+2. THE Widget SHALL write log files to `%AppData%\Quire\Logs\` with one log file per calendar day and the filename pattern `log-{yyyy-MM-dd}.txt`.
 3. WHEN a log entry is at Debug level, THE Widget SHALL write it only when debug logging is explicitly enabled in `AppSettings`; Debug entries SHALL NOT appear in production log files by default.
 4. THE Widget SHALL NOT log full AI prompt text or full AI response text at Information level or above.
 
@@ -190,11 +190,11 @@ DesktopConcepts is a lightweight Windows desktop widget (.NET 8, WPF) that deliv
 
 #### Acceptance Criteria
 
-1. THE `DesktopConcepts.Domain` project SHALL contain zero references to `System.Windows`, `System.Net.Http`, or any WPF assembly.
-2. THE `DesktopConcepts.Application` project SHALL reference only `DesktopConcepts.Domain` and SHALL contain zero direct references to `System.Net.Http` or any WPF assembly.
-3. THE `DesktopConcepts.Infrastructure` project SHALL reference `DesktopConcepts.Domain` and SHALL NOT reference `DesktopConcepts.Application` or any WPF assembly.
-4. THE `DesktopConcepts.UI` project SHALL reference `DesktopConcepts.Application` and `DesktopConcepts.Infrastructure` for DI wiring only; business logic SHALL reside in Application or Domain, not in code-behind files.
-5. THE `DesktopConcepts.Tests` project SHALL be able to test Domain and Application layers without instantiating any WPF UI component.
+1. THE `Quire.Domain` project SHALL contain zero references to `System.Windows`, `System.Net.Http`, or any WPF assembly.
+2. THE `Quire.Application` project SHALL reference only `Quire.Domain` and SHALL contain zero direct references to `System.Net.Http` or any WPF assembly.
+3. THE `Quire.Infrastructure` project SHALL reference `Quire.Domain` and SHALL NOT reference `Quire.Application` or any WPF assembly.
+4. THE `Quire.UI` project SHALL reference `Quire.Application` and `Quire.Infrastructure` for DI wiring only; business logic SHALL reside in Application or Domain, not in code-behind files.
+5. THE `Quire.Tests` project SHALL be able to test Domain and Application layers without instantiating any WPF UI component.
 
 ---
 
@@ -304,7 +304,7 @@ DesktopConcepts is a lightweight Windows desktop widget (.NET 8, WPF) that deliv
 
 #### Acceptance Criteria
 
-1. THE installer SHALL place all application binaries outside `%AppData%\DesktopConcepts`.
-2. WHEN the application is uninstalled, THE uninstaller SHALL remove all files placed by the installer and SHALL NOT remove the `%AppData%\DesktopConcepts` directory automatically (preserving user data).
+1. THE installer SHALL place all application binaries outside `%AppData%\Quire`.
+2. WHEN the application is uninstalled, THE uninstaller SHALL remove all files placed by the installer and SHALL NOT remove the `%AppData%\Quire` directory automatically (preserving user data).
 3. THE installer SHALL NOT require administrator privileges for a per-user installation.
 4. WHEN the Widget detects an available update via the RefreshScheduler, THE Widget SHALL notify the user with an in-widget banner and SHALL NOT apply the update silently without user consent.
