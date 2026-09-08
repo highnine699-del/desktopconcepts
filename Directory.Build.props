@@ -7,8 +7,8 @@
     framework version so restore never demands a version not in the local cache.
   -->
   <PropertyGroup>
-    <!-- Pin exact runtime pack version to what is installed (8.0.29) -->
-    <RuntimeFrameworkVersion>8.0.29</RuntimeFrameworkVersion>
+    <!-- Pin exact runtime pack version to what is installed (8.0.30) -->
+    <RuntimeFrameworkVersion>8.0.30</RuntimeFrameworkVersion>
 
     <!-- Valid values for SDK 10: direct, all. 'direct' only audits direct deps. -->
     <NuGetAuditMode>direct</NuGetAuditMode>
