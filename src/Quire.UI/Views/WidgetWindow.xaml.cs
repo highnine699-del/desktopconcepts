@@ -708,8 +708,10 @@ public partial class WidgetWindow : Window
     {
         if (_currentConcept is not null)
         {
-            CompactTitle.Text = _currentConcept.Title;
-            // Truncate explanation to ~60-80 characters for teaser
+            CompactCategory.Text      = _currentConcept.Category;
+            CompactSlotIndicator.Text = $"{_currentIndex + 1}/3";
+            CompactTitle.Text         = _currentConcept.Title;
+            // Truncate explanation to ~70 characters for teaser
             var teaser = _currentConcept.Explanation.Length > 70
                 ? _currentConcept.Explanation.Substring(0, 70) + "…"
                 : _currentConcept.Explanation;
@@ -717,8 +719,10 @@ public partial class WidgetWindow : Window
         }
         else
         {
-            CompactTitle.Text = "Loading…";
-            CompactTeaser.Text = "Today's concept";
+            CompactCategory.Text      = string.Empty;
+            CompactSlotIndicator.Text = string.Empty;
+            CompactTitle.Text         = "Loading…";
+            CompactTeaser.Text        = "Today's concept";
         }
     }
 
@@ -734,7 +738,7 @@ public partial class WidgetWindow : Window
     private void UpdateDots()
     {
         var active   = (System.Windows.Media.SolidColorBrush)FindResource("BrushPrimary");
-        var inactive = (System.Windows.Media.SolidColorBrush)FindResource("BrushBorder");
+        var inactive = (System.Windows.Media.SolidColorBrush)FindResource("BrushBorderStrong");
         Dot1.Fill = _currentIndex == 0 ? active : inactive;
         Dot2.Fill = _currentIndex == 1 ? active : inactive;
         Dot3.Fill = _currentIndex == 2 ? active : inactive;

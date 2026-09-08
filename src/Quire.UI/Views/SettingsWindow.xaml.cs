@@ -6,13 +6,13 @@ using System.Windows.Media;
 namespace Quire.UI.Views;
 
 /// <summary>
-/// Settings window — no JSON editing required.
+/// Settings window — sidebar nav layout.
 ///
-/// Sections:
-///   1. AI mode toggle  — Local / Cloud (two clickable cards)
-///   2. Cloud section   — zero-setup info banner + collapsed Advanced override
-///      Advanced:       Base URL, Model, API key (masked) — all optional
-///   3. Weekday topics  — one TextBox per day
+/// Panels:
+///   AI &amp; Content — mode toggle (Local/Cloud), advanced cloud override, weekday topics
+///   General        — storage info
+///   Appearance     — opacity slider, pin-behind-desktop-icons
+///   About          — version info
 ///
 /// Cloud mode works with zero input from the user (shared proxy).
 /// The Advanced section lets technical users point at their own provider/key.
@@ -46,6 +46,47 @@ public partial class SettingsWindow : Window
     {
         _isClosed = true;
         base.OnClosed(e);
+    }
+
+    // ── Window chrome ─────────────────────────────────────────────────────────
+
+    private void TitleBar_MouseDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton == System.Windows.Input.MouseButton.Left)
+            DragMove();
+    }
+
+    private void MinimizeWindow_Click(object sender, RoutedEventArgs e)
+        => WindowState = WindowState.Minimized;
+
+    // ── Sidebar navigation ────────────────────────────────────────────────────
+
+    private void NavAI_Click(object sender, RoutedEventArgs e)         => ShowPanel("AI");
+    private void NavGeneral_Click(object sender, RoutedEventArgs e)    => ShowPanel("General");
+    private void NavAppearance_Click(object sender, RoutedEventArgs e) => ShowPanel("Appearance");
+    private void NavAbout_Click(object sender, RoutedEventArgs e)      => ShowPanel("About");
+
+    private void ShowPanel(string name)
+    {
+        PanelAI.Visibility         = name == "AI"         ? Visibility.Visible : Visibility.Collapsed;
+        PanelGeneral.Visibility    = name == "General"    ? Visibility.Visible : Visibility.Collapsed;
+        PanelAppearance.Visibility = name == "Appearance" ? Visibility.Visible : Visibility.Collapsed;
+        PanelAbout.Visibility      = name == "About"      ? Visibility.Visible : Visibility.Collapsed;
+
+        ContentPanelTitle.Text = name switch
+        {
+            "AI"         => "AI & Content",
+            "General"    => "General",
+            "Appearance" => "Appearance",
+            "About"      => "About",
+            _            => name
+        };
+
+        // Update nav button styles
+        NavAI.Style         = (Style)FindResource(name == "AI"         ? "NavButtonActive" : "NavButton");
+        NavGeneral.Style    = (Style)FindResource(name == "General"    ? "NavButtonActive" : "NavButton");
+        NavAppearance.Style = (Style)FindResource(name == "Appearance" ? "NavButtonActive" : "NavButton");
+        NavAbout.Style      = (Style)FindResource(name == "About"      ? "NavButtonActive" : "NavButton");
     }
 
     // ── Load ──────────────────────────────────────────────────────────────────
@@ -109,7 +150,7 @@ public partial class SettingsWindow : Window
     private void ApplyModeSelection(string mode)
     {
         var activeBorder   = (SolidColorBrush)FindResource("BrushPrimary");
-        var inactiveBorder = (SolidColorBrush)FindResource("BrushBorder");
+        var inactiveBorder = (SolidColorBrush)FindResource("BrushBorderStrong");
         var activeBg       = new SolidColorBrush(
             Color.FromArgb(30, activeBorder.Color.R, activeBorder.Color.G, activeBorder.Color.B));
         var inactiveBg     = (SolidColorBrush)FindResource("BrushSurface");
@@ -129,7 +170,7 @@ public partial class SettingsWindow : Window
     {
         _advancedExpanded           = expanded;
         AdvancedFields.Visibility   = expanded ? Visibility.Visible  : Visibility.Collapsed;
-        AdvancedChevron.Text        = expanded ? "▾" : "▸";
+        AdvancedChevron.Text        = expanded ? "▾" : "›";
     }
 
     // ── API key show / hide ───────────────────────────────────────────────────
@@ -170,6 +211,7 @@ public partial class SettingsWindow : Window
 
     private bool Validate()
     {
+        ValidationBar.Visibility        = Visibility.Collapsed;
         ApiKeyValidationText.Visibility = Visibility.Collapsed;
 
         // Advanced section: if the user has entered anything, validate it is complete
@@ -179,7 +221,6 @@ public partial class SettingsWindow : Window
             var baseUrl = AdvancedBaseUrl.Text.Trim();
             var model   = AdvancedModel.Text.Trim();
 
-            // If ANY advanced field is filled, require ALL three
             var anyFilled = !string.IsNullOrWhiteSpace(key)
                          || !string.IsNullOrWhiteSpace(baseUrl)
                          || !string.IsNullOrWhiteSpace(model);
@@ -187,38 +228,30 @@ public partial class SettingsWindow : Window
             if (anyFilled)
             {
                 if (string.IsNullOrWhiteSpace(baseUrl))
-                {
-                    ApiKeyValidationText.Text       = "API endpoint is required when using your own key.";
-                    ApiKeyValidationText.Visibility = Visibility.Visible;
-                    return false;
-                }
+                    return ShowValidationError("API endpoint is required when using your own key.");
                 if (string.IsNullOrWhiteSpace(model))
-                {
-                    ApiKeyValidationText.Text       = "Model name is required when using your own key.";
-                    ApiKeyValidationText.Visibility = Visibility.Visible;
-                    return false;
-                }
+                    return ShowValidationError("Model name is required when using your own key.");
                 if (string.IsNullOrWhiteSpace(key) || key.Length < 10)
-                {
-                    ApiKeyValidationText.Text       = "Paste your API key (at least 10 characters).";
-                    ApiKeyValidationText.Visibility = Visibility.Visible;
-                    return false;
-                }
+                    return ShowValidationError("Paste your API key (at least 10 characters).");
             }
         }
 
-        // Topics — no blank days
         foreach (var (box, day) in DayBoxes())
         {
             if (string.IsNullOrWhiteSpace(box.Text))
-            {
-                ApiKeyValidationText.Text       = $"Topic for {day} cannot be empty.";
-                ApiKeyValidationText.Visibility = Visibility.Visible;
-                return false;
-            }
+                return ShowValidationError($"Topic for {day} cannot be empty.");
         }
 
         return true;
+    }
+
+    private bool ShowValidationError(string message)
+    {
+        ApiKeyValidationText.Text       = message;
+        ApiKeyValidationText.Visibility = Visibility.Visible;
+        ValidationBar.Visibility        = Visibility.Visible;
+        SaveBar.Visibility              = Visibility.Collapsed;
+        return false;
     }
 
     // ── Save ──────────────────────────────────────────────────────────────────
@@ -266,8 +299,10 @@ public partial class SettingsWindow : Window
                 "Settings saved. Mode={Mode}, Advanced={HasAdvanced}",
                 _selectedMode, advanced != null);
 
-            SaveStatusText.Text       = "✓ Settings saved. Restart the app to apply AI mode changes.";
-            SaveStatusText.Visibility = Visibility.Visible;
+            // Show save confirmation in the status bar
+            SaveStatusText.Text      = "✓  Settings saved. Restart the app to apply AI mode changes.";
+            SaveBar.Visibility       = Visibility.Visible;
+            ValidationBar.Visibility = Visibility.Collapsed;
 
             await Task.Delay(2500);
             if (!_isClosed) Close();
@@ -275,8 +310,7 @@ public partial class SettingsWindow : Window
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to save settings.");
-            ApiKeyValidationText.Text       = "Failed to save settings. Please try again.";
-            ApiKeyValidationText.Visibility = Visibility.Visible;
+            ShowValidationError("Failed to save settings. Please try again.");
         }
     }
 

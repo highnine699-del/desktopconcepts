@@ -122,24 +122,42 @@ public class CloudPrefetchService
                     avoidList.Add(concept.Title); // grow avoid-list across the whole batch
                     _logger.LogDebug("  Prefetch [{Day}/{Total}] slot [{Slot}/3]: {Title}",
                         dayOffset + 1, needed, slot + 1, concept.Title);
+
+                    // Small delay between calls to avoid hitting provider rate limits.
+                    // 21 calls in < 1 second reliably triggers 429 on the shared proxy.
+                    // 300 ms between calls = ~6 s for a full 7-day batch — imperceptible.
+                    if (slot < 2)
+                        await Task.Delay(300, cancellationToken);
                 }
 
                 newSets.Add(new DailyConceptSet(date, concepts.AsReadOnly()));
+
+                // Commit each completed day immediately — partial batches are saved
+                // so a quota hit mid-run doesn't discard already-generated sets.
+                await _buffer.AddRangeAsync(
+                    new List<DailyConceptSet> { newSets[^1] }, cancellationToken);
+                _logger.LogDebug("Committed day {Day}/{Total} to buffer.", dayOffset + 1, needed);
+
+                // Delay between days too
+                if (dayOffset < needed - 1)
+                    await Task.Delay(400, cancellationToken);
             }
 
-            await _buffer.AddRangeAsync(newSets, cancellationToken);
             _logger.LogInformation("Prefetch complete. Added {Count} sets.", newSets.Count);
         }
         catch (QuotaExceededException)
         {
-            // Re-throw so callers can distinguish quota from network failures
-            _logger.LogWarning("Quota exceeded during prefetch — propagating to caller.");
+            // Partial batch already committed above — log how much was saved
+            _logger.LogWarning(
+                "Quota exceeded during prefetch after {Done}/{Total} days — partial batch committed.",
+                newSets.Count, needed);
             throw;
         }
         catch (Exception ex)
         {
-            // Network unavailable or other transient failure — log and surface nothing to UI.
-            _logger.LogWarning(ex, "Prefetch failed — will retry on next trigger.");
+            // Network unavailable or other transient failure — partial batch already committed.
+            _logger.LogWarning(ex, "Prefetch failed after {Done}/{Total} days — will retry on next trigger.",
+                newSets.Count, needed);
         }
     }
 

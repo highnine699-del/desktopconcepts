@@ -86,8 +86,10 @@ public class ConceptGenerationBackgroundService : BackgroundService
                 }
                 catch (QuotaExceededException)
                 {
+                    // Quota on startup prefetch is not a user-facing error — we may still have
+                    // enough buffer for today's concept. Do NOT fire QuotaExceeded to the UI here;
+                    // the daily consumption path will raise it if the buffer is truly empty.
                     _logger.LogWarning("Quota exceeded during startup prefetch — will use existing buffer or history.");
-                    QuotaExceeded?.Invoke();
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
