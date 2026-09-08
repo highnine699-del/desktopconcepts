@@ -3,7 +3,7 @@
 
 #define AppName "Quire"
 #define AppPublisher "Kevwe"
-#define AppVersion "1.0.9"
+#define AppVersion "1.0.10"
 #define AppExeName "Quire.exe"
 #define AppPublisherURL "https://github.com/highnine699-del/quire-app"
 #define AppSupportURL "https://github.com/highnine699-del/quire-app/issues"
@@ -58,3 +58,4 @@ Filename: "{app}\{#AppExeName}"; Description: "Launch {#AppName}"; Flags: nowait
 
 [UninstallRun]
 Filename: "{cmd}"; Parameters: "/c taskkill /F /IM {#AppExeName}"; Flags: runhidden
+
