@@ -353,20 +353,22 @@
          PROGRESS BAR — styled for download view
     ══════════════════════════════════════════════════════════════════ -->
     <Style x:Key="ProgressBarPrimary" TargetType="ProgressBar">
-        <Setter Property="Height"      Value="4"/>
-        <Setter Property="Foreground"  Value="{StaticResource BrushPrimary}"/>
-        <Setter Property="Background"  Value="{StaticResource BrushBorder}"/>
+        <Setter Property="Height"          Value="4"/>
+        <Setter Property="Foreground"      Value="{StaticResource BrushPrimary}"/>
+        <Setter Property="Background"      Value="{StaticResource BrushBorder}"/>
         <Setter Property="BorderThickness" Value="0"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="ProgressBar">
-                    <Border Background="{TemplateBinding Background}"
-                            CornerRadius="2">
-                        <Border x:Name="PART_Indicator"
-                                HorizontalAlignment="Left"
-                                Background="{TemplateBinding Foreground}"
+                    <Grid x:Name="TemplateRoot">
+                        <Border x:Name="PART_Track"
+                                Background="{TemplateBinding Background}"
                                 CornerRadius="2"/>
-                    </Border>
+                        <Border x:Name="PART_Indicator"
+                                Background="{TemplateBinding Foreground}"
+                                HorizontalAlignment="Left"
+                                CornerRadius="2"/>
+                    </Grid>
                 </ControlTemplate>
             </Setter.Value>
         </Setter>

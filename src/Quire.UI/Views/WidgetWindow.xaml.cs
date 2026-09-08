@@ -853,11 +853,35 @@ public partial class WidgetWindow : Window
     {
         if (_currentConcept is null) return;
         var query = Uri.EscapeDataString(_currentConcept.Title);
-        Process.Start(new ProcessStartInfo
+        var url   = $"https://www.google.com/search?q={query}";
+        OpenUrl(url);
+    }
+
+    /// <summary>
+    /// Opens a URL in the default browser. Uses cmd /c start which is the most
+    /// reliable method on Windows regardless of browser association registry state.
+    /// Never throws — logs a warning and returns silently on failure.
+    /// </summary>
+    private void OpenUrl(string url)
+    {
+        // cmd /c start is the most universally reliable way to open a URL on Windows.
+        // Process.Start with UseShellExecute can fail with Win32Exception 1155 when
+        // no default browser is registered. explorer.exe treats URLs as paths on some
+        // configurations. cmd /c start "" "url" handles all cases correctly.
+        try
         {
-            FileName        = $"https://www.google.com/search?q={query}",
-            UseShellExecute = true
-        });
+            Process.Start(new ProcessStartInfo
+            {
+                FileName        = "cmd.exe",
+                Arguments       = $"/c start \"\" \"{url}\"",
+                UseShellExecute = false,
+                CreateNoWindow  = true
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not open browser for URL: {Url}", url);
+        }
     }
 
     private void ErrorRetry_Click(object sender, RoutedEventArgs e)
