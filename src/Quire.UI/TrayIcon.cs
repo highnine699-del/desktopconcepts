@@ -96,21 +96,23 @@ public sealed class TrayIcon : IDisposable
     private const uint CMD_QUIT     = 1003;
 
     // ── State ────────────────────────────────────────────────────────────────
-    private readonly Window  _window;
-    private readonly IntPtr  _hwnd;
-    private readonly IntPtr  _hIcon;   // GDI icon handle — freed in Dispose
-    private NOTIFYICONDATA   _nid;
-    private bool             _disposed;
-    private HwndSource?      _hwndSource;
+    private readonly Window    _window;
+    private readonly IntPtr    _hwnd;
+    private readonly IntPtr    _hIcon;
+    private readonly Func<bool> _isVisible;   // (#5) sync flag supplier — avoids WPF async staleness
+    private NOTIFYICONDATA     _nid;
+    private bool               _disposed;
+    private HwndSource?        _hwndSource;
 
     public event Action? ToggleRequested;
     public event Action? OpenSettingsRequested;
     public event Action? QuitRequested;
 
-    public TrayIcon(Window window)
+    public TrayIcon(Window window, Func<bool> isVisible)
     {
-        _window = window;
-        _hwnd   = new WindowInteropHelper(window).Handle;
+        _window    = window;
+        _isVisible = isVisible;
+        _hwnd      = new WindowInteropHelper(window).Handle;
 
         _hwndSource = HwndSource.FromHwnd(_hwnd);
         _hwndSource?.AddHook(WndProc);
@@ -188,7 +190,8 @@ public sealed class TrayIcon : IDisposable
         var menu = CreatePopupMenu();
         try
         {
-            var label = _window.IsVisible ? "Hide widget" : "Show widget";
+            // (#5) Use the synchronous flag — _window.IsVisible can lag after Hide()
+            var label = _isVisible() ? "Hide widget" : "Show widget";
             AppendMenu(menu, MF_STRING,    CMD_TOGGLE,   label);
             AppendMenu(menu, MF_STRING,    CMD_SETTINGS, "AI Settings…");
             AppendMenu(menu, MF_SEPARATOR, 0,            string.Empty);

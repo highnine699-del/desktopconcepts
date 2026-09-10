@@ -3,7 +3,7 @@
 
 #define AppName        "Quire"
 #define AppPublisher   "Kevwe"
-#define AppVersion     "1.0.10"
+#define AppVersion     "1.0.11"
 #define AppExeName     "Quire.exe"
 #define AppPublisherURL "https://github.com/highnine699-del/quire-app"
 #define AppSupportURL  "https://github.com/highnine699-del/quire-app/issues"

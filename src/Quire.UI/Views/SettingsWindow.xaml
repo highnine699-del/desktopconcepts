@@ -180,23 +180,18 @@
                         <Border Height="1"
                                 Background="{StaticResource BrushBorder}"
                                 Margin="0,0,0,10"/>
-                        <Button Content="Close"
-                                Style="{StaticResource NavButton}"
+                        <Button Style="{StaticResource NavButton}"
                                 Click="Cancel_Click">
-                            <Button.ContentTemplate>
-                                <DataTemplate>
-                                    <StackPanel Orientation="Horizontal">
-                                        <TextBlock Text="✕" FontSize="10"
-                                                   Foreground="{StaticResource BrushTextSubtle}"
-                                                   Margin="0,0,8,0"
-                                                   VerticalAlignment="Center"/>
-                                        <TextBlock Text="Close"
-                                                   FontFamily="{StaticResource FontPrimary}"
-                                                   FontSize="{StaticResource FontSizeNav}"
-                                                   VerticalAlignment="Center"/>
-                                    </StackPanel>
-                                </DataTemplate>
-                            </Button.ContentTemplate>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="✕" FontSize="10"
+                                           Foreground="{StaticResource BrushTextSubtle}"
+                                           Margin="0,0,8,0"
+                                           VerticalAlignment="Center"/>
+                                <TextBlock Text="Close"
+                                           FontFamily="{StaticResource FontPrimary}"
+                                           FontSize="{StaticResource FontSizeNav}"
+                                           VerticalAlignment="Center"/>
+                            </StackPanel>
                         </Button>
                     </StackPanel>
 
@@ -626,20 +621,23 @@
                                 <!-- Opacity -->
                                 <TextBlock Style="{StaticResource FieldLabel}"
                                            Text="Opacity (transparency)"/>
-                                <Grid Margin="0,0,0,16">
+                                <Grid Margin="0,0,0,4">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="50"/>
+                                        <ColumnDefinition Width="46"/>
+                                        <ColumnDefinition Width="8"/>
+                                        <ColumnDefinition Width="Auto"/>
                                     </Grid.ColumnDefinitions>
                                     <Slider x:Name="OpacitySlider"
                                             Grid.Column="0"
-                                            Minimum="0.4"
+                                            Minimum="0.5"
                                             Maximum="1.0"
                                             TickFrequency="0.05"
                                             IsSnapToTickEnabled="True"
                                             Value="1.0"
                                             VerticalAlignment="Center"
                                             Margin="0,0,10,0"
+                                            AutomationProperties.Name="Widget opacity"
                                             ValueChanged="OpacitySlider_ValueChanged"/>
                                     <TextBlock Grid.Column="1"
                                                x:Name="OpacityValueText"
@@ -649,7 +647,20 @@
                                                Foreground="{StaticResource BrushTextMuted}"
                                                VerticalAlignment="Center"
                                                HorizontalAlignment="Right"/>
+                                    <!-- Reset to fully opaque (#18) -->
+                                    <Button Grid.Column="3"
+                                            Content="Reset"
+                                            Style="{StaticResource ButtonGhost}"
+                                            Padding="6,3"
+                                            FontSize="{StaticResource FontSizeSmall}"
+                                            ToolTip="Reset to 100% opacity"
+                                            AutomationProperties.Name="Reset opacity to 100 percent"
+                                            Click="OpacityReset_Click"/>
                                 </Grid>
+                                <TextBlock Text="Minimum 50% — lower values may make the widget hard to see."
+                                           Style="{StaticResource FieldLabel}"
+                                           TextWrapping="Wrap"
+                                           Margin="0,0,0,16"/>
 
                                 <Border Style="{StaticResource SeparatorLine}"/>
 
@@ -715,7 +726,8 @@
                                                        FontFamily="{StaticResource FontPrimary}"
                                                        FontSize="{StaticResource FontSizeBody}"/>
                                             <TextBlock Grid.Row="0" Grid.Column="1"
-                                                       Text="1.0.9"
+                                                       x:Name="AboutVersionText"
+                                                       Text="—"
                                                        Foreground="{StaticResource BrushText}"
                                                        FontFamily="{StaticResource FontPrimary}"
                                                        FontSize="{StaticResource FontSizeBody}"/>

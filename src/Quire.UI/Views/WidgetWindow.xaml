@@ -12,6 +12,7 @@
         ResizeMode="NoResize"
         WindowStartupLocation="Manual"
         Left="40" Top="40"
+        KeyDown="Window_KeyDown"
         MouseLeftButtonDown="Window_MouseLeftButtonDown">
 
     <!-- Right-click context menu -->
@@ -20,12 +21,12 @@
                      BorderBrush="{StaticResource BrushBorderStrong}"
                      BorderThickness="1"
                      Foreground="{StaticResource BrushText}">
-            <MenuItem Header="Pin / Unpin"   Click="CtxPin_Click"/>
-            <MenuItem Header="Copy concept"  Click="CtxCopy_Click"/>
+            <MenuItem Header="Pin / Unpin"  Click="CtxPin_Click"/>
+            <MenuItem Header="Copy concept" Click="CtxCopy_Click"/>
             <Separator/>
-            <MenuItem Header="Settings…"     Click="OpenSettings_Click"/>
+            <MenuItem Header="Settings…"    Click="OpenSettings_Click"/>
             <Separator/>
-            <MenuItem Header="Quit Quire"    Click="CtxQuit_Click"/>
+            <MenuItem Header="Quit Quire"   Click="CtxQuit_Click"/>
         </ContextMenu>
     </Window.ContextMenu>
 
@@ -33,9 +34,9 @@
         <ScaleTransform ScaleX="1" ScaleY="1" CenterX="160" CenterY="0"/>
     </Window.RenderTransform>
 
-    <!-- ═══════════════════════════════════════════════════════════════════
-         ROOT CARD — true dark bg, subtle border, 12px radius, no shadow
-    ═══════════════════════════════════════════════════════════════════ -->
+    <!-- ═══════════════════════════════════════════════════════════════
+         ROOT CARD
+    ═══════════════════════════════════════════════════════════════ -->
     <Border x:Name="RootBorder"
             Background="{StaticResource BrushBackground}"
             BorderBrush="{StaticResource BrushBorder}"
@@ -44,13 +45,12 @@
 
         <StackPanel>
 
-            <!-- ══ UPDATE AVAILABLE BANNER ══════════════════════════════
-                 Accent-yellow bar. Shown when RefreshScheduler fires.
-            ══════════════════════════════════════════════════════════ -->
+            <!-- ══ UPDATE AVAILABLE BANNER ══════════════════════════ -->
             <Border x:Name="UpdateBanner"
                     Visibility="Collapsed"
                     Background="{StaticResource BrushAccent}"
-                    CornerRadius="10,10,0,0"
+                    CornerRadius="{StaticResource RadiusCard}"
+                    Margin="0"
                     Padding="12,8">
                 <Grid>
                     <Grid.ColumnDefinitions>
@@ -76,26 +76,27 @@
                             Background="{StaticResource BrushBackground}"
                             Foreground="{StaticResource BrushText}"
                             BorderThickness="0"
+                            AutomationProperties.Name="Update Quire now"
                             Style="{StaticResource ButtonBase}"/>
                     <Button Grid.Column="3"
                             Content="Later"
                             Click="UpdateLater_Click"
                             Padding="6,4"
                             FontSize="{StaticResource FontSizeSmall}"
+                            AutomationProperties.Name="Dismiss update"
                             Style="{StaticResource ButtonGhost}"
                             Foreground="{StaticResource BrushBackground}"/>
                 </Grid>
             </Border>
 
-            <!-- ══ SETUP CHOICE VIEW (first-run) ════════════════════════
-                 Shown only when IsFirstRun = true.
+            <!-- ══ SETUP CHOICE VIEW (first-run) ════════════════════
+                 Cards use triggers for hover state (#6).
             ══════════════════════════════════════════════════════════ -->
             <Border x:Name="SetupChoiceView"
                     Visibility="Collapsed"
                     Padding="18,16">
                 <StackPanel>
 
-                    <!-- Header -->
                     <TextBlock Text="Welcome to Quire"
                                Foreground="{StaticResource BrushText}"
                                FontFamily="{StaticResource FontPrimary}"
@@ -108,7 +109,7 @@
                                FontSize="{StaticResource FontSizeBody}"
                                Margin="0,0,0,16"/>
 
-                    <!-- Local AI card -->
+                    <!-- Local AI card — hover state via triggers (#6) -->
                     <Border x:Name="SetupLocalCard"
                             Background="{StaticResource BrushSurface}"
                             BorderBrush="{StaticResource BrushBorderStrong}"
@@ -117,7 +118,18 @@
                             Padding="14,12"
                             Margin="0,0,0,8"
                             Cursor="Hand"
+                            AutomationProperties.Name="Choose Local AI mode"
                             MouseLeftButtonUp="SetupChooseLocal_Click">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Style.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter Property="Background" Value="{StaticResource BrushSurfaceElevated}"/>
+                                        <Setter Property="BorderBrush" Value="{StaticResource BrushPrimary}"/>
+                                    </Trigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
                         <StackPanel>
                             <StackPanel Orientation="Horizontal" Margin="0,0,0,5">
                                 <TextBlock Text="🖥  Local AI"
@@ -147,7 +159,7 @@
                         </StackPanel>
                     </Border>
 
-                    <!-- Cloud AI card -->
+                    <!-- Cloud AI card — hover state via triggers (#6) -->
                     <Border x:Name="SetupCloudCard"
                             Background="{StaticResource BrushSurface}"
                             BorderBrush="{StaticResource BrushBorderStrong}"
@@ -156,7 +168,18 @@
                             Padding="14,12"
                             Margin="0,0,0,14"
                             Cursor="Hand"
+                            AutomationProperties.Name="Choose Cloud AI mode"
                             MouseLeftButtonUp="SetupChooseCloud_Click">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Style.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter Property="Background" Value="{StaticResource BrushSurfaceElevated}"/>
+                                        <Setter Property="BorderBrush" Value="{StaticResource BrushPrimary}"/>
+                                    </Trigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
                         <StackPanel>
                             <StackPanel Orientation="Horizontal" Margin="0,0,0,5">
                                 <TextBlock Text="☁  Cloud AI"
@@ -194,12 +217,10 @@
                 </StackPanel>
             </Border>
 
-            <!-- ══ COMPACT VIEW ══════════════════════════════════════════
-                 Default visible state. Small always-on-top badge.
-                 Layout: [dot] [category · title + teaser] [›] [×]
-            ══════════════════════════════════════════════════════════ -->
+            <!-- ══ COMPACT VIEW ══════════════════════════════════════ -->
             <Border x:Name="CompactView"
-                    Padding="14,10">
+                    Padding="14,10"
+                    AutomationProperties.Name="Quire widget — click to expand">
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto"/>
@@ -208,7 +229,7 @@
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
 
-                    <!-- Category dot — 6×6, indigo -->
+                    <!-- Category dot -->
                     <Ellipse Grid.Column="0"
                              Width="6" Height="6"
                              Fill="{StaticResource BrushPrimary}"
@@ -219,10 +240,11 @@
                     <StackPanel Grid.Column="1"
                                 Cursor="Hand"
                                 VerticalAlignment="Center"
+                                AutomationProperties.Name="Expand concept"
                                 MouseLeftButtonUp="CompactView_Click">
                         <StackPanel Orientation="Horizontal">
                             <TextBlock x:Name="CompactCategory"
-                                       Text="Networking"
+                                       Text=""
                                        Foreground="{StaticResource BrushPrimary}"
                                        FontFamily="{StaticResource FontPrimary}"
                                        FontSize="{StaticResource FontSizeXSmall}"
@@ -230,7 +252,7 @@
                                        Margin="0,0,6,0"
                                        VerticalAlignment="Center"/>
                             <TextBlock x:Name="CompactSlotIndicator"
-                                       Text="1/3"
+                                       Text=""
                                        Foreground="{StaticResource BrushTextSubtle}"
                                        FontFamily="{StaticResource FontPrimary}"
                                        FontSize="{StaticResource FontSizeXSmall}"
@@ -254,7 +276,7 @@
                                    TextWrapping="Wrap"/>
                     </StackPanel>
 
-                    <!-- Expand chevron -->
+                    <!-- Expand chevron (#16 tooltip) -->
                     <TextBlock Grid.Column="2"
                                Text="›"
                                Foreground="{StaticResource BrushTextSubtle}"
@@ -262,13 +284,16 @@
                                VerticalAlignment="Center"
                                Margin="8,0,4,0"
                                Cursor="Hand"
+                               ToolTip="Expand"
+                               AutomationProperties.Name="Expand"
                                MouseLeftButtonUp="CompactView_Click"/>
 
-                    <!-- × close-to-tray -->
+                    <!-- × close-to-tray (#16 tooltip already present) -->
                     <Button Grid.Column="3"
                             x:Name="CompactCloseButton"
                             Content="×"
                             ToolTip="Close to tray"
+                            AutomationProperties.Name="Close to tray"
                             Click="CloseToTray_Click"
                             Foreground="{StaticResource BrushTextSubtle}"
                             FontSize="15"
@@ -278,88 +303,84 @@
                 </Grid>
             </Border>
 
-            <!-- ══ EXPANDED VIEW ═════════════════════════════════════════
-                 Full concept card: category badge + slot dots + title +
-                 explanation + three action buttons + pin + close.
-            ══════════════════════════════════════════════════════════ -->
+            <!-- ══ EXPANDED VIEW ═════════════════════════════════════ -->
             <Border x:Name="ExpandedView"
                     Visibility="Collapsed"
-                    Padding="16,14">
+                    Padding="16,14"
+                    MouseEnter="ExpandedView_MouseEnter"
+                    MouseLeave="ExpandedView_MouseLeave">
                 <Border.RenderTransform>
                     <TranslateTransform/>
                 </Border.RenderTransform>
                 <StackPanel>
 
-                    <!-- ── Header row ─────────────────────────────────── -->
-                    <Grid Margin="0,0,0,10">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="4"/>
-                            <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="4"/>
-                            <!-- slot dots mid -->
-                            <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="4"/>
-                            <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="4"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
+                    <!-- ── Header row — DockPanel prevents overflow (#11) ── -->
+                    <DockPanel Margin="0,0,0,10" LastChildFill="True">
 
-                        <!-- Category badge pill -->
-                        <Border Grid.Column="0"
-                                Background="{StaticResource BrushPrimaryMuted}"
+                        <!-- Right-side controls docked first -->
+                        <StackPanel DockPanel.Dock="Right"
+                                    Orientation="Horizontal"
+                                    VerticalAlignment="Center">
+
+                            <!-- Slot dots -->
+                            <Ellipse x:Name="Dot1"
+                                     Width="6" Height="6" Margin="0,0,4,0"
+                                     Fill="{StaticResource BrushPrimary}"
+                                     VerticalAlignment="Center"
+                                     AutomationProperties.Name="Concept 1 of 3"/>
+                            <Ellipse x:Name="Dot2"
+                                     Width="6" Height="6" Margin="0,0,4,0"
+                                     Fill="{StaticResource BrushBorderStrong}"
+                                     VerticalAlignment="Center"
+                                     AutomationProperties.Name="Concept 2 of 3"/>
+                            <Ellipse x:Name="Dot3"
+                                     Width="6" Height="6" Margin="0,0,8,0"
+                                     Fill="{StaticResource BrushBorderStrong}"
+                                     VerticalAlignment="Center"
+                                     AutomationProperties.Name="Concept 3 of 3"/>
+
+                            <!-- Pin toggle (#17 automation) -->
+                            <ToggleButton x:Name="PinButton"
+                                          Style="{StaticResource ToggleButtonPin}"
+                                          Content="📌"
+                                          ToolTip="Pin — keeps this concept visible"
+                                          AutomationProperties.Name="Pin concept"
+                                          Checked="PinButton_Checked"
+                                          Unchecked="PinButton_Unchecked"
+                                          VerticalAlignment="Center"/>
+
+                            <!-- Close to tray -->
+                            <Button Content="×"
+                                    ToolTip="Close to tray"
+                                    AutomationProperties.Name="Close to tray"
+                                    Click="CloseToTray_Click"
+                                    Foreground="{StaticResource BrushTextSubtle}"
+                                    FontSize="15"
+                                    VerticalAlignment="Center"
+                                    Style="{StaticResource ButtonClose}"
+                                    Padding="4,1"
+                                    Margin="4,0,0,0"/>
+                        </StackPanel>
+
+                        <!-- Category badge — fills remaining space, truncates if long (#11) -->
+                        <Border Background="{StaticResource BrushPrimaryMuted}"
                                 BorderBrush="{StaticResource BrushPrimary}"
                                 BorderThickness="1"
                                 CornerRadius="{StaticResource RadiusBadge}"
                                 Padding="8,3"
-                                HorizontalAlignment="Left"
-                                VerticalAlignment="Center">
+                                VerticalAlignment="Center"
+                                MaxWidth="160">
                             <TextBlock x:Name="CategoryTag"
                                        Text="Networking"
                                        Foreground="{StaticResource BrushPrimary}"
                                        FontFamily="{StaticResource FontPrimary}"
                                        FontSize="{StaticResource FontSizeBadge}"
-                                       FontWeight="SemiBold"/>
+                                       FontWeight="SemiBold"
+                                       TextTrimming="CharacterEllipsis"/>
                         </Border>
+                    </DockPanel>
 
-                        <!-- Slot dots: 1/3 indicator -->
-                        <Ellipse x:Name="Dot1" Grid.Column="1"
-                                 Width="6" Height="6"
-                                 Fill="{StaticResource BrushPrimary}"
-                                 VerticalAlignment="Center"/>
-                        <Ellipse x:Name="Dot2" Grid.Column="3"
-                                 Width="6" Height="6"
-                                 Fill="{StaticResource BrushBorderStrong}"
-                                 VerticalAlignment="Center"/>
-                        <Ellipse x:Name="Dot3" Grid.Column="5"
-                                 Width="6" Height="6"
-                                 Fill="{StaticResource BrushBorderStrong}"
-                                 VerticalAlignment="Center"/>
-
-                        <!-- Pin toggle -->
-                        <ToggleButton Grid.Column="7"
-                                      x:Name="PinButton"
-                                      Style="{StaticResource ToggleButtonPin}"
-                                      Content="📌"
-                                      ToolTip="Pin — keeps this concept visible"
-                                      Checked="PinButton_Checked"
-                                      Unchecked="PinButton_Unchecked"
-                                      VerticalAlignment="Center"/>
-
-                        <!-- Close to tray -->
-                        <Button Grid.Column="9"
-                                Content="×"
-                                ToolTip="Close to tray"
-                                Click="CloseToTray_Click"
-                                Foreground="{StaticResource BrushTextSubtle}"
-                                FontSize="15"
-                                VerticalAlignment="Center"
-                                Style="{StaticResource ButtonClose}"
-                                Padding="4,1"/>
-                    </Grid>
-
-                    <!-- ── Concept title ──────────────────────────────── -->
+                    <!-- ── Concept title (#17 live region) ── -->
                     <TextBlock x:Name="TitleText"
                                Text="Loading…"
                                Foreground="{StaticResource BrushText}"
@@ -367,9 +388,10 @@
                                FontSize="{StaticResource FontSizeTitle}"
                                FontWeight="SemiBold"
                                TextWrapping="Wrap"
+                               AutomationProperties.LiveSetting="Polite"
                                Margin="0,0,0,10"/>
 
-                    <!-- ── Concept explanation ────────────────────────── -->
+                    <!-- ── Concept explanation ── -->
                     <TextBlock x:Name="ExplanationText"
                                Text=""
                                Foreground="{StaticResource BrushTextMuted}"
@@ -379,12 +401,12 @@
                                LineHeight="21"
                                Margin="0,0,0,16"/>
 
-                    <!-- ── Divider ─────────────────────────────────────── -->
+                    <!-- ── Divider ── -->
                     <Border Height="1"
                             Background="{StaticResource BrushBorder}"
                             Margin="0,0,0,12"/>
 
-                    <!-- ── Action buttons ─────────────────────────────── -->
+                    <!-- ── Action buttons (#16 tooltips, #17 automation) ── -->
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
@@ -394,46 +416,46 @@
                             <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
 
-                        <!-- Read More — icon + label -->
                         <Button Grid.Column="0"
+                                x:Name="ReadMoreButton"
                                 Style="{StaticResource ButtonBase}"
                                 Padding="0,7"
+                                ToolTip="Open a web search for this concept"
+                                AutomationProperties.Name="Read more about this concept"
                                 Click="ReadMore_Click">
                             <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
                                 <TextBlock Text="↗" FontSize="11"
-                                           Foreground="{StaticResource BrushTextMuted}"
                                            Margin="0,0,4,0"
                                            VerticalAlignment="Center"/>
                                 <TextBlock Text="Read More"
                                            FontFamily="{StaticResource FontPrimary}"
                                            FontSize="{StaticResource FontSizeSmall}"
-                                           Foreground="{StaticResource BrushTextMuted}"
                                            VerticalAlignment="Center"/>
                             </StackPanel>
                         </Button>
 
-                        <!-- Copy — icon + label -->
                         <Button Grid.Column="2"
                                 Style="{StaticResource ButtonBase}"
                                 Padding="0,7"
+                                ToolTip="Copy title and explanation to clipboard"
+                                AutomationProperties.Name="Copy concept to clipboard"
                                 Click="Copy_Click">
                             <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
                                 <TextBlock Text="⎘" FontSize="11"
-                                           Foreground="{StaticResource BrushTextMuted}"
                                            Margin="0,0,4,0"
                                            VerticalAlignment="Center"/>
                                 <TextBlock Text="Copy"
                                            FontFamily="{StaticResource FontPrimary}"
                                            FontSize="{StaticResource FontSizeSmall}"
-                                           Foreground="{StaticResource BrushTextMuted}"
                                            VerticalAlignment="Center"/>
                             </StackPanel>
                         </Button>
 
-                        <!-- Next — primary fill -->
                         <Button Grid.Column="4"
                                 Style="{StaticResource ButtonPrimary}"
                                 Padding="0,7"
+                                ToolTip="Show next concept"
+                                AutomationProperties.Name="Next concept"
                                 Click="Next_Click">
                             <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
                                 <TextBlock Text="Next"
@@ -451,7 +473,7 @@
                 </StackPanel>
             </Border>
 
-            <!-- ══ FIRST-RUN / DOWNLOAD VIEW ════════════════════════════ -->
+            <!-- ══ FIRST-RUN / DOWNLOAD VIEW ════════════════════════ -->
             <Border x:Name="FirstRunView"
                     Visibility="Collapsed"
                     Padding="16,14">
@@ -471,10 +493,10 @@
                                TextWrapping="Wrap"
                                Margin="0,0,0,14"/>
 
-                    <!-- Slim progress bar -->
                     <ProgressBar x:Name="DownloadProgress"
                                  Style="{StaticResource ProgressBarPrimary}"
                                  Minimum="0" Maximum="100" Value="0"
+                                 AutomationProperties.Name="Download progress"
                                  Margin="0,0,0,6"/>
 
                     <TextBlock x:Name="DownloadStatusText"
@@ -484,7 +506,6 @@
                                FontSize="{StaticResource FontSizeSmall}"
                                Margin="0,0,0,12"/>
 
-                    <!-- Error panel -->
                     <Border x:Name="DownloadErrorPanel"
                             Visibility="Collapsed"
                             Background="{StaticResource BrushSurface}"
@@ -502,6 +523,7 @@
                                        Margin="0,0,0,10"/>
                             <Button Content="Retry"
                                     Style="{StaticResource ButtonPrimary}"
+                                    AutomationProperties.Name="Retry download"
                                     HorizontalAlignment="Left"
                                     Padding="14,6"
                                     Click="DownloadRetry_Click"/>
@@ -510,6 +532,7 @@
 
                     <Button Content="Use cloud mode instead"
                             Style="{StaticResource ButtonGhost}"
+                            AutomationProperties.Name="Switch to cloud mode"
                             Click="SkipToCloud_Click"
                             HorizontalAlignment="Right"
                             Padding="8,5"
@@ -518,13 +541,12 @@
                 </StackPanel>
             </Border>
 
-            <!-- ══ ERROR VIEW ════════════════════════════════════════════ -->
+            <!-- ══ ERROR VIEW ════════════════════════════════════════ -->
             <Border x:Name="ErrorView"
                     Visibility="Collapsed"
                     Padding="16,14">
                 <StackPanel>
 
-                    <!-- Error icon + title -->
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
                         <TextBlock Text="⚠"
                                    Foreground="{StaticResource BrushError}"
@@ -554,17 +576,19 @@
                         </Grid.ColumnDefinitions>
                         <Button Grid.Column="0" Content="Retry"
                                 Style="{StaticResource ButtonPrimary}"
+                                AutomationProperties.Name="Retry generating concept"
                                 Padding="0,7"
                                 Click="ErrorRetry_Click"/>
                         <Button Grid.Column="2" Content="Settings"
                                 Style="{StaticResource ButtonBase}"
+                                AutomationProperties.Name="Open settings"
                                 Padding="0,7"
                                 Click="OpenSettings_Click"/>
                     </Grid>
                 </StackPanel>
             </Border>
 
-            <!-- ══ QUOTA VIEW (HTTP 429) ═════════════════════════════════ -->
+            <!-- ══ QUOTA VIEW ════════════════════════════════════════ -->
             <Border x:Name="QuotaView"
                     Visibility="Collapsed"
                     Padding="16,14">
@@ -599,17 +623,19 @@
                         </Grid.ColumnDefinitions>
                         <Button Grid.Column="0" Content="Use Local mode"
                                 Style="{StaticResource ButtonBase}"
+                                AutomationProperties.Name="Switch to local AI mode"
                                 Padding="0,7"
                                 Click="OpenSettings_Click"/>
                         <Button Grid.Column="2" Content="OK, got it"
                                 Style="{StaticResource ButtonPrimary}"
+                                AutomationProperties.Name="Dismiss quota notice"
                                 Padding="0,7"
                                 Click="QuotaDismiss_Click"/>
                     </Grid>
                 </StackPanel>
             </Border>
 
-            <!-- ══ TRAY HINT (shown once on first run) ═══════════════════ -->
+            <!-- ══ TRAY HINT ═════════════════════════════════════════ -->
             <Border x:Name="TrayHintBanner"
                     Visibility="Collapsed"
                     Background="{StaticResource BrushSurface}"
@@ -617,6 +643,7 @@
                     BorderThickness="0,1,0,0"
                     Padding="14,9"
                     Cursor="Hand"
+                    AutomationProperties.Name="Dismiss tray tip"
                     MouseLeftButtonUp="TrayHint_Dismiss">
                 <Grid>
                     <Grid.ColumnDefinitions>

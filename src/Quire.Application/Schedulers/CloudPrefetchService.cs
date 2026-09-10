@@ -134,8 +134,10 @@ public class CloudPrefetchService
 
                 // Commit each completed day immediately — partial batches are saved
                 // so a quota hit mid-run doesn't discard already-generated sets.
+                // We pass the single new set as a list so AddRangeAsync appends it
+                // without rewriting the whole buffer file.
                 await _buffer.AddRangeAsync(
-                    new List<DailyConceptSet> { newSets[^1] }, cancellationToken);
+                    [newSets[^1]], cancellationToken);
                 _logger.LogDebug("Committed day {Day}/{Total} to buffer.", dayOffset + 1, needed);
 
                 // Delay between days too
@@ -196,31 +198,32 @@ public class CloudPrefetchService
 
     // ── Private helpers ───────────────────────────────────────────────────────
 
+    // Shared HttpClient for connectivity probes. HttpClient is thread-safe and
+    // designed for reuse — creating a new instance per call causes socket exhaustion.
+    // Timeout is short (5 s) since we only need a headers response, not a body.
+    private static readonly HttpClient _probeClient = new HttpClient
+    {
+        Timeout = TimeSpan.FromSeconds(5)
+    };
+
     /// <summary>
     /// Checks connectivity by sending an HTTP HEAD request to the proxy endpoint.
     /// A DNS-only check always succeeds for Cloudflare-hosted Workers even when
     /// the Worker itself is down — a real HTTP probe confirms the endpoint is up.
-    /// Times out after 5 seconds to keep the background refill non-blocking.
     /// </summary>
     private static async Task<bool> IsInternetAvailableAsync(CancellationToken cancellationToken)
     {
         try
         {
-            // Use a short, separate HttpClient — not the injected provider client —
-            // so a timeout here doesn't interfere with ongoing concept generation requests.
-            using var cts  = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             cts.CancelAfter(TimeSpan.FromSeconds(5));
 
-            using var http = new HttpClient();
-            // HEAD to the proxy root — no body transferred, minimal quota impact.
-            // We only need a 2xx/3xx/4xx status; any HTTP response means the worker is up.
-            var response = await http.SendAsync(
+            var response = await _probeClient.SendAsync(
                 new HttpRequestMessage(HttpMethod.Head, AppSettings.DefaultProxyBaseUrl),
                 HttpCompletionOption.ResponseHeadersRead,
                 cts.Token);
 
             // Any HTTP response (even 4xx) means the host is reachable and responding.
-            // Only OperationCanceledException / HttpRequestException mean offline.
             return true;
         }
         catch

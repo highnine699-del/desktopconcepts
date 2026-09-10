@@ -1,5 +1,6 @@
 using Quire.Domain;
 using Microsoft.Extensions.Logging;
+using System.Reflection;
 using System.Windows;
 using System.Windows.Media;
 
@@ -11,11 +12,15 @@ namespace Quire.UI.Views;
 /// Panels:
 ///   AI &amp; Content — mode toggle (Local/Cloud), advanced cloud override, weekday topics
 ///   General        — storage info
-///   Appearance     — opacity slider, pin-behind-desktop-icons
-///   About          — version info
+///   Appearance     — opacity slider + reset, pin-behind-desktop-icons
+///   About          — version read from assembly (not hardcoded)
 ///
-/// Cloud mode works with zero input from the user (shared proxy).
-/// The Advanced section lets technical users point at their own provider/key.
+/// Audit fixes applied:
+///   #12 — version read dynamically from Assembly.GetExecutingAssembly()
+///   #21 — PreSelectMode applies visual selection synchronously on Loaded
+///          before async data arrives, preventing the "no highlight" flash
+///   #23 — save status only mentions "restart" when AI mode actually changed
+///   #18 — OpacityReset_Click snaps slider back to 1.0; minimum raised to 0.5
 /// </summary>
 public partial class SettingsWindow : Window
 {
@@ -23,22 +28,43 @@ public partial class SettingsWindow : Window
     private readonly ILogger<SettingsWindow> _logger;
 
     private string  _selectedMode      = "local";
+    /// <summary>Mode as loaded from disk — compared on save to detect mode change. (#23)</summary>
+    private string  _originalMode      = "local";
     private bool    _advancedExpanded;
     private bool    _apiKeyVisible;
     private string? _pendingModeOverride;
-    private bool    _isClosed;          // guards against Close() after window is already disposed
+    private bool    _isClosed;
 
     public SettingsWindow(ISettingsStore settingsStore, ILogger<SettingsWindow> logger)
     {
         _settingsStore = settingsStore;
         _logger        = logger;
         InitializeComponent();
-        Loaded += async (_, _) => await LoadCurrentSettingsAsync();
+
+        // (#21) Apply pending mode override visually as soon as the window elements
+        // are ready — before the async load resolves — so there is no un-highlighted
+        // flash when SkipToCloud opens Settings with cloud pre-selected.
+        Loaded += (_, _) =>
+        {
+            if (_pendingModeOverride is not null)
+            {
+                _selectedMode = _pendingModeOverride;
+                ApplyModeSelection(_pendingModeOverride);
+                CloudSection.Visibility =
+                    _pendingModeOverride == "cloud" ? Visibility.Visible : Visibility.Collapsed;
+            }
+
+            // Kick off async load after sync visual setup (#21)
+            _ = LoadCurrentSettingsAsync();
+
+            // (#12) Populate About panel version dynamically
+            PopulateAboutVersion();
+        };
     }
 
     /// <summary>
-    /// Pre-selects a mode before the window opens (called before ShowDialog).
-    /// Used by SkipToCloud_Click so the Cloud section is immediately visible.
+    /// Pre-selects a mode before ShowDialog. Visual application now happens in
+    /// the Loaded handler synchronously so there is no flash. (#21)
     /// </summary>
     public void PreSelectMode(string mode) => _pendingModeOverride = mode;
 
@@ -46,6 +72,26 @@ public partial class SettingsWindow : Window
     {
         _isClosed = true;
         base.OnClosed(e);
+    }
+
+    // ── About version (#12) ───────────────────────────────────────────────────
+
+    /// <summary>
+    /// Reads the assembly version at runtime so the About panel is always accurate,
+    /// regardless of which release number the script bumped to. (#12)
+    /// </summary>
+    private void PopulateAboutVersion()
+    {
+        try
+        {
+            var version = Assembly.GetExecutingAssembly().GetName().Version;
+            if (version is not null && AboutVersionText is not null)
+                AboutVersionText.Text = $"{version.Major}.{version.Minor}.{version.Build}";
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not read assembly version for About panel.");
+        }
     }
 
     // ── Window chrome ─────────────────────────────────────────────────────────
@@ -82,7 +128,6 @@ public partial class SettingsWindow : Window
             _            => name
         };
 
-        // Update nav button styles
         NavAI.Style         = (Style)FindResource(name == "AI"         ? "NavButtonActive" : "NavButton");
         NavGeneral.Style    = (Style)FindResource(name == "General"    ? "NavButtonActive" : "NavButton");
         NavAppearance.Style = (Style)FindResource(name == "Appearance" ? "NavButtonActive" : "NavButton");
@@ -95,23 +140,29 @@ public partial class SettingsWindow : Window
     {
         var s = await _settingsStore.LoadAsync(CancellationToken.None);
 
+        // Respect a pending override for mode, but always record the on-disk mode
+        // so we can detect a real change on save. (#23)
+        _originalMode = s.Mode;
         var effectiveMode = _pendingModeOverride ?? s.Mode;
-        _selectedMode     = effectiveMode;
-        ApplyModeSelection(effectiveMode);
-        CloudSection.Visibility = effectiveMode == "cloud" ? Visibility.Visible : Visibility.Collapsed;
 
-        // Advanced override — populate if set
+        // Only update if the pending override wasn't already applied in Loaded (#21)
+        if (_pendingModeOverride is null)
+        {
+            _selectedMode = effectiveMode;
+            ApplyModeSelection(effectiveMode);
+            CloudSection.Visibility = effectiveMode == "cloud" ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        // Advanced override
         var adv = s.AdvancedCloudProvider;
         if (adv != null)
         {
-            AdvancedBaseUrl.Text     = adv.BaseUrl;
-            AdvancedModel.Text       = adv.Model;
+            AdvancedBaseUrl.Text        = adv.BaseUrl;
+            AdvancedModel.Text          = adv.Model;
             AdvancedApiKeyBox.Password  = adv.ApiKey ?? string.Empty;
             AdvancedApiKeyPlain.Text    = adv.ApiKey ?? string.Empty;
 
-            // Auto-expand if an override is already set
-            if (!string.IsNullOrWhiteSpace(adv.ApiKey) ||
-                !string.IsNullOrWhiteSpace(adv.BaseUrl))
+            if (!string.IsNullOrWhiteSpace(adv.ApiKey) || !string.IsNullOrWhiteSpace(adv.BaseUrl))
                 SetAdvancedExpanded(true);
         }
 
@@ -125,9 +176,10 @@ public partial class SettingsWindow : Window
         TopicSat.Text = map.GetValueOrDefault(DayOfWeek.Saturday,  "Mathematics");
         TopicSun.Text = map.GetValueOrDefault(DayOfWeek.Sunday,    "Computer Engineering");
 
-        // Appearance settings
-        OpacitySlider.Value = s.WidgetOpacity;
-        UpdateOpacityText(s.WidgetOpacity);
+        // Appearance — clamp to new 0.5 minimum (#18)
+        var opacity = Math.Max(s.WidgetOpacity, 0.5);
+        OpacitySlider.Value = opacity;
+        UpdateOpacityText(opacity);
         PinBehindIconsCheckBox.IsChecked = s.PinBehindDesktopIcons;
     }
 
@@ -149,16 +201,16 @@ public partial class SettingsWindow : Window
 
     private void ApplyModeSelection(string mode)
     {
-        var activeBorder   = (SolidColorBrush)FindResource("BrushPrimary");
+        var activeBorder = (SolidColorBrush)FindResource("BrushPrimary");
         var inactiveBorder = (SolidColorBrush)FindResource("BrushBorderStrong");
-        var activeBg       = new SolidColorBrush(
+        var activeBg = new SolidColorBrush(
             Color.FromArgb(30, activeBorder.Color.R, activeBorder.Color.G, activeBorder.Color.B));
-        var inactiveBg     = (SolidColorBrush)FindResource("BrushSurface");
+        var inactiveBg = (SolidColorBrush)FindResource("BrushSurface");
 
-        LocalCard.BorderBrush  = mode == "local"  ? activeBorder  : inactiveBorder;
-        LocalCard.Background   = mode == "local"  ? activeBg      : inactiveBg;
-        CloudCard.BorderBrush  = mode == "cloud"  ? activeBorder  : inactiveBorder;
-        CloudCard.Background   = mode == "cloud"  ? activeBg      : inactiveBg;
+        LocalCard.BorderBrush = mode == "local" ? activeBorder  : inactiveBorder;
+        LocalCard.Background  = mode == "local" ? activeBg      : inactiveBg;
+        CloudCard.BorderBrush = mode == "cloud" ? activeBorder  : inactiveBorder;
+        CloudCard.Background  = mode == "cloud" ? activeBg      : inactiveBg;
     }
 
     // ── Advanced section toggle ───────────────────────────────────────────────
@@ -168,9 +220,9 @@ public partial class SettingsWindow : Window
 
     private void SetAdvancedExpanded(bool expanded)
     {
-        _advancedExpanded           = expanded;
-        AdvancedFields.Visibility   = expanded ? Visibility.Visible  : Visibility.Collapsed;
-        AdvancedChevron.Text        = expanded ? "▾" : "›";
+        _advancedExpanded         = expanded;
+        AdvancedFields.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed;
+        AdvancedChevron.Text      = expanded ? "▾" : "›";
     }
 
     // ── API key show / hide ───────────────────────────────────────────────────
@@ -180,17 +232,17 @@ public partial class SettingsWindow : Window
         _apiKeyVisible = !_apiKeyVisible;
         if (_apiKeyVisible)
         {
-            AdvancedApiKeyPlain.Text        = AdvancedApiKeyBox.Password;
-            AdvancedApiKeyBox.Visibility    = Visibility.Collapsed;
-            AdvancedApiKeyPlain.Visibility  = Visibility.Visible;
-            ShowHideApiKey.Content          = "Hide";
+            AdvancedApiKeyPlain.Text       = AdvancedApiKeyBox.Password;
+            AdvancedApiKeyBox.Visibility   = Visibility.Collapsed;
+            AdvancedApiKeyPlain.Visibility = Visibility.Visible;
+            ShowHideApiKey.Content         = "Hide";
         }
         else
         {
-            AdvancedApiKeyBox.Password      = AdvancedApiKeyPlain.Text;
-            AdvancedApiKeyBox.Visibility    = Visibility.Visible;
-            AdvancedApiKeyPlain.Visibility  = Visibility.Collapsed;
-            ShowHideApiKey.Content          = "Show";
+            AdvancedApiKeyBox.Password     = AdvancedApiKeyPlain.Text;
+            AdvancedApiKeyBox.Visibility   = Visibility.Visible;
+            AdvancedApiKeyPlain.Visibility = Visibility.Collapsed;
+            ShowHideApiKey.Content         = "Show";
         }
     }
 
@@ -198,14 +250,34 @@ public partial class SettingsWindow : Window
 
     private void ClearAdvanced_Click(object sender, RoutedEventArgs e)
     {
-        AdvancedBaseUrl.Text            = string.Empty;
-        AdvancedModel.Text              = string.Empty;
-        AdvancedApiKeyBox.Password      = string.Empty;
-        AdvancedApiKeyPlain.Text        = string.Empty;
-        ApiKeyValidationText.Visibility = Visibility.Collapsed;
+        AdvancedBaseUrl.Text           = string.Empty;
+        AdvancedModel.Text             = string.Empty;
+        AdvancedApiKeyBox.Password     = string.Empty;
+        AdvancedApiKeyPlain.Text       = string.Empty;
+        ValidationBar.Visibility       = Visibility.Collapsed;
         SetAdvancedExpanded(false);
         _logger.LogInformation("Advanced cloud override cleared.");
     }
+
+    // ── Opacity slider + reset (#18) ─────────────────────────────────────────
+
+    private void OpacitySlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (OpacityValueText is null) return;
+        UpdateOpacityText(e.NewValue);
+        if (Owner is WidgetWindow widget)
+            widget.SetBackgroundOpacity(Math.Clamp(e.NewValue, 0.5, 1.0));
+    }
+
+    /// <summary>Snaps opacity back to 100% and updates the live preview. (#18)</summary>
+    private void OpacityReset_Click(object sender, RoutedEventArgs e)
+    {
+        OpacitySlider.Value = 1.0;
+        // ValueChanged fires and handles the rest
+    }
+
+    private void UpdateOpacityText(double value)
+        => OpacityValueText.Text = $"{(int)(value * 100)}%";
 
     // ── Validation ────────────────────────────────────────────────────────────
 
@@ -214,7 +286,6 @@ public partial class SettingsWindow : Window
         ValidationBar.Visibility        = Visibility.Collapsed;
         ApiKeyValidationText.Visibility = Visibility.Collapsed;
 
-        // Advanced section: if the user has entered anything, validate it is complete
         if (_selectedMode == "cloud" && _advancedExpanded)
         {
             var key     = _apiKeyVisible ? AdvancedApiKeyPlain.Text : AdvancedApiKeyBox.Password;
@@ -254,7 +325,7 @@ public partial class SettingsWindow : Window
         return false;
     }
 
-    // ── Save ──────────────────────────────────────────────────────────────────
+    // ── Save (#23 conditional restart message) ────────────────────────────────
 
     private async void Save_Click(object sender, RoutedEventArgs e)
     {
@@ -264,7 +335,6 @@ public partial class SettingsWindow : Window
         {
             var current = await _settingsStore.LoadAsync(CancellationToken.None);
 
-            // Build AdvancedCloudProvider — null if the section is empty/collapsed
             ProviderSettings? advanced = null;
             if (_selectedMode == "cloud" && _advancedExpanded)
             {
@@ -277,8 +347,8 @@ public partial class SettingsWindow : Window
 
             var updated = current with
             {
-                Mode                   = _selectedMode,
-                AdvancedCloudProvider  = advanced,
+                Mode                  = _selectedMode,
+                AdvancedCloudProvider = advanced,
                 Topics = new WeekdayTopicMap(new Dictionary<DayOfWeek, string>
                 {
                     [DayOfWeek.Monday]    = TopicMon.Text.Trim(),
@@ -289,18 +359,19 @@ public partial class SettingsWindow : Window
                     [DayOfWeek.Saturday]  = TopicSat.Text.Trim(),
                     [DayOfWeek.Sunday]    = TopicSun.Text.Trim(),
                 }),
-                WidgetOpacity          = OpacitySlider.Value,
-                PinBehindDesktopIcons  = PinBehindIconsCheckBox.IsChecked ?? false
+                WidgetOpacity         = OpacitySlider.Value,
+                PinBehindDesktopIcons = PinBehindIconsCheckBox.IsChecked ?? false
             };
 
             await _settingsStore.SaveAsync(updated, CancellationToken.None);
+            _logger.LogInformation("Settings saved. Mode={Mode}", _selectedMode);
 
-            _logger.LogInformation(
-                "Settings saved. Mode={Mode}, Advanced={HasAdvanced}",
-                _selectedMode, advanced != null);
+            // (#23) Only mention restart when the AI mode actually changed
+            bool modeChanged = _selectedMode != _originalMode;
+            SaveStatusText.Text = modeChanged
+                ? "✓  Settings saved. Restart the app to apply the AI mode change."
+                : "✓  Settings saved.";
 
-            // Show save confirmation in the status bar
-            SaveStatusText.Text      = "✓  Settings saved. Restart the app to apply AI mode changes.";
             SaveBar.Visibility       = Visibility.Visible;
             ValidationBar.Visibility = Visibility.Collapsed;
 
@@ -315,31 +386,6 @@ public partial class SettingsWindow : Window
     }
 
     private void Cancel_Click(object sender, RoutedEventArgs e) => Close();
-
-    // ── Opacity slider live update ─────────────────────────────────────────────
-
-    private void OpacitySlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
-    {
-        // Guard: this event fires during XAML initialization (when the Slider's default Value
-        // is applied) before InitializeComponent fully populates named elements.
-        // OpacityValueText may be null at that point — skip the update safely.
-        if (OpacityValueText is null) return;
-
-        UpdateOpacityText(e.NewValue);
-
-        // Live preview: Owner is null until ShowDialog is called, so the
-        // pattern-match is already null-safe — no explicit null check needed.
-        if (Owner is WidgetWindow widget)
-        {
-            widget.SetBackgroundOpacity(Math.Clamp(e.NewValue, 0.4, 1.0));
-        }
-    }
-
-    private void UpdateOpacityText(double value)
-    {
-        var percent = (int)(value * 100);
-        OpacityValueText.Text = $"{percent}%";
-    }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 

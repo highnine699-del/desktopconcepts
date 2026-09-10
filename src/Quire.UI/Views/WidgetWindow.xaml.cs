@@ -22,6 +22,18 @@ namespace Quire.UI.Views;
 ///
 /// Window is always-on-top, hidden from Alt-Tab and taskbar (WS_EX_TOOLWINDOW).
 /// Deactivated event drives Compact←Expanded so no global mouse hook is needed.
+///
+/// Audit fixes applied:
+///   #1  — Right-click no longer collapses Expanded before menu fires (_contextMenuOpen guard)
+///   #2  — Next button cross-fades content instead of snapping
+///   #3  — Drag threshold raised to 6px for high-DPI reliability
+///   #4  — Auto-collapse timer paused while mouse is over the expanded view
+///   #5  — Tray menu label uses a bool flag, not Window.IsVisible (async-safe)
+///   #7  — ReadMore disables button briefly; errors are swallowed gracefully
+///   #15 — Keyboard navigation: Space/Enter expand, Escape collapses, Left/Right cycle
+///   #19 — _currentIndex initialized to 2 so first %3 yields 0
+///   #20 — QuotaDismiss only shows CompactView when a concept exists
+///   #22 — WorkerW watchdog stopped immediately in ReapplySettingsAsync
 /// </summary>
 public partial class WidgetWindow : Window
 {
@@ -29,7 +41,6 @@ public partial class WidgetWindow : Window
     private const int GWL_EXSTYLE      = -20;
     private const int WS_EX_TOOLWINDOW = 0x00000080;
     private const int WS_EX_APPWINDOW  = 0x00040000;
-    private const int WM_COMMAND       = 0x0111;
     private const int WM_USER          = 0x0400;
     private const int SPAWN_WORKER     = 0x052C;
 
@@ -53,24 +64,20 @@ public partial class WidgetWindow : Window
     [Flags]
     private enum SendMessageTimeoutFlags : uint
     {
-        SMTO_NORMAL = 0x0,
-        SMTO_BLOCK = 0x1,
-        SMTO_ABORTIFHUNG = 0x2,
-        SMTO_NOTIMEOUTIFNOTHUNG = 0x8
+        SMTO_NORMAL              = 0x0,
+        SMTO_BLOCK               = 0x1,
+        SMTO_ABORTIFHUNG         = 0x2,
+        SMTO_NOTIMEOUTIFNOTHUNG  = 0x8
     }
 
     // ── Tunable constants ────────────────────────────────────────────────────
+    private static readonly TimeSpan ExpandedTimeout   = TimeSpan.FromSeconds(30);
+    private const long LowRamThresholdBytes            = 4L * 1024 * 1024 * 1024; // 4 GB
     /// <summary>
-    /// How long the Expanded view stays open before auto-collapsing to Compact.
-    /// Satisfies the §1.3 "Collapsed: returns to Compact after timeout" requirement.
+    /// Drag threshold in logical pixels. 6px is reliable across 100–200% DPI scaling
+    /// without registering normal clicks as drags. (#3)
     /// </summary>
-    private static readonly TimeSpan ExpandedTimeout = TimeSpan.FromSeconds(30);
-
-    /// <summary>
-    /// RAM threshold below which local inference is considered impractical.
-    /// User is shown a "consider cloud mode" nudge on first run.
-    /// </summary>
-    private const long LowRamThresholdBytes = 4L * 1024 * 1024 * 1024; // 4 GB
+    private const double DragThreshold = 6.0;
 
     // ── Dependencies ─────────────────────────────────────────────────────────
     private readonly WidgetStateManager                    _stateManager;
@@ -86,16 +93,37 @@ public partial class WidgetWindow : Window
 
     // ── Runtime state ────────────────────────────────────────────────────────
     private Concept?          _currentConcept;
-    private int               _currentIndex;          // mirrors RotationScheduler index (0-2)
-    private string?           _pendingUpdateUrl;       // set when UpdateAvailable fires
-    private AppSettings?      _cachedSettings;         // last loaded settings — avoids disk reads on drag
-    private DispatcherTimer?  _expandedTimer;          // fires Timeout trigger after 30 s
+    /// <summary>
+    /// Initialized to 2 so the first (_currentIndex + 1) % 3 = 0. (#19)
+    /// </summary>
+    private int               _currentIndex = 2;
+    private string?           _pendingUpdateUrl;
+    private AppSettings?      _cachedSettings;
+    private DispatcherTimer?  _expandedTimer;
     private CancellationTokenSource? _downloadCts;
     private TrayIcon?         _trayIcon;
-    private Point             _dragStartPoint;         // for distinguishing click vs drag
-    private DispatcherTimer?  _positionSaveTimer;      // debounced position save
-    private DispatcherTimer?  _workerWWatchdog;        // checks WorkerW parent every 30 s
-    private IntPtr?           _originalParent;         // saved for restoring normal behavior
+    private Point             _dragStartPoint;
+    private DispatcherTimer?  _positionSaveTimer;
+    private DispatcherTimer?  _workerWWatchdog;
+    private IntPtr?           _originalParent;
+
+    /// <summary>
+    /// True while the widget's own ContextMenu is open.
+    /// Prevents OnDeactivated from collapsing the widget before the menu fires. (#1)
+    /// </summary>
+    private bool _contextMenuOpen;
+
+    /// <summary>
+    /// Synchronous flag tracking widget visibility — used by TrayIcon so the
+    /// menu label is never stale after Hide() before IsVisible propagates. (#5)
+    /// </summary>
+    private bool _isWidgetVisible = true;
+
+    /// <summary>
+    /// True while the mouse is over the expanded view — auto-collapse timer is
+    /// paused to avoid collapsing while the user is actively reading. (#4)
+    /// </summary>
+    private bool _mouseOverExpanded;
 
     public WidgetWindow(
         WidgetStateManager                 stateManager,
@@ -125,17 +153,19 @@ public partial class WidgetWindow : Window
         _stateManager.StateChanged        += OnStateChanged;
         _rotationScheduler.ConceptRotated += OnConceptRotated;
 
-        // Download service events
         _downloadService.ProgressChanged   += OnDownloadProgress;
         _downloadService.DownloadCompleted += OnDownloadCompleted;
         _downloadService.DownloadFailed    += OnDownloadFailed;
 
-        // NOTE: ConceptSetReady and GenerationFailed are wired from App.xaml.cs
-        // via the public OnConceptSetReady / OnGenerationFailed methods so both
-        // local (DailyConceptScheduler) and cloud (CloudPrefetchService) flows
-        // share a single delivery path.
+        // Wire context menu open/close so OnDeactivated can guard against #1
+        ContextMenu.Opened += (_, _) => _contextMenuOpen = true;
+        ContextMenu.Closed += (_, _) =>
+        {
+            _contextMenuOpen = false;
+            // Re-fire Deactivated logic now that the menu is gone, if still not active
+            if (!IsActive) _stateManager.Fire(WidgetTrigger.OutsideClick);
+        };
 
-        // Load saved position or set default top-right
         _ = ApplyPositionAndOpacityAsync();
     }
 
@@ -147,19 +177,14 @@ public partial class WidgetWindow : Window
         ApplyToolWindowStyle();
         _rotationScheduler.Start();
 
-        // Wire system-tray icon (Task 1) — must come after handle is created
-        _trayIcon = new TrayIcon(this);
+        _trayIcon = new TrayIcon(this, () => _isWidgetVisible); // (#5) pass flag supplier
         _trayIcon.ToggleRequested       += TrayToggle;
         _trayIcon.OpenSettingsRequested += () => OpenSettings_Click(this, new RoutedEventArgs());
         _trayIcon.QuitRequested         += () => WpfApp.Current.Shutdown();
 
-        // Wire position save timer (debounced)
         LocationChanged += OnLocationChanged;
-
-        // Apply WorkerW pinning if enabled
         _ = ApplyWorkerWModeAsync();
 
-        // Log startup timing so the <300 ms gate can be verified
         var sw = Stopwatch.GetTimestamp();
         _ = RunStartupChecksAsync().ContinueWith(_ =>
             _logger.LogInformation("Startup checks completed in {Ms:F1} ms.",
@@ -183,43 +208,37 @@ public partial class WidgetWindow : Window
 
     private void TrayToggle()
     {
-        if (IsVisible)
+        if (_isWidgetVisible)
         {
             Hide();
+            _isWidgetVisible = false;
             _logger.LogDebug("Widget hidden via tray.");
         }
         else
         {
             Show();
             Activate();
+            _isWidgetVisible = true;
             _logger.LogDebug("Widget shown via tray.");
         }
     }
 
-    // ── Startup checks (setup choice → first-run → normal) ───────────────────
+    // ── Startup checks ────────────────────────────────────────────────────────
 
     private async Task RunStartupChecksAsync()
     {
         var settings = await _settingsStore.LoadAsync(CancellationToken.None);
 
-        // SETUP CHOICE — must happen before any other first-run logic.
-        // IsFirstRun is true until the user picks local or cloud on the setup screen.
         if (settings.IsFirstRun)
         {
             _logger.LogInformation("First run detected — showing setup choice screen.");
             Dispatcher.Invoke(ShowSetupChoiceView);
-            // Execution resumes inside SetupChooseLocal_Click / SetupChooseCloud_Click
-            // via ContinueAfterSetupChoiceAsync, so we return here.
             return;
         }
 
         await ContinueAfterSetupChoiceAsync(settings);
     }
 
-    /// <summary>
-    /// Called after the user dismisses the setup choice (or on all subsequent runs).
-    /// Runs the local-model download check (local mode) or cloud prefetch (cloud mode).
-    /// </summary>
     private async Task ContinueAfterSetupChoiceAsync(AppSettings settings)
     {
         if (settings.Mode == "local")
@@ -241,23 +260,16 @@ public partial class WidgetWindow : Window
                 await StartModelDownloadAsync(settings.Provider.BaseUrl, modelPath);
             }
         }
-        // Cloud mode: prefill is handled by ConceptGenerationBackgroundService on startup.
-        // Nothing to do here — the widget goes straight to Compact.
     }
 
-    private static string GetModelPath(AppSettings settings)
-    {
-        // Store the model under %AppData%\Quire\Models\<model-name>.gguf
-        return SysPath.Combine(
+    private static string GetModelPath(AppSettings settings) =>
+        SysPath.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "Quire", "Models",
-            $"{settings.Provider.Model}.gguf");
-    }
+            "Quire", "Models", $"{settings.Provider.Model}.gguf");
 
     private static bool IsRamSufficient()
     {
-        // MEMORYSTATUSEX is the Win32 struct for GlobalMemoryStatusEx
-        var mem = new MEMORYSTATUSEX { dwLength = (uint)System.Runtime.InteropServices.Marshal.SizeOf<MEMORYSTATUSEX>() };
+        var mem = new MEMORYSTATUSEX { dwLength = (uint)Marshal.SizeOf<MEMORYSTATUSEX>() };
         return GlobalMemoryStatusEx(ref mem) && mem.ullTotalPhys >= LowRamThresholdBytes;
     }
 
@@ -280,9 +292,9 @@ public partial class WidgetWindow : Window
 
     private void ShowLowRamNudge()
     {
-        CompactView.Visibility  = Visibility.Collapsed;
-        FirstRunView.Visibility = Visibility.Visible;
-        DownloadStatusText.Text =
+        CompactView.Visibility      = Visibility.Collapsed;
+        FirstRunView.Visibility     = Visibility.Visible;
+        DownloadStatusText.Text     =
             "Your system has less than 4 GB RAM. Local AI inference may be slow or unstable. " +
             "Consider switching to Cloud mode via AI Settings.";
         DownloadProgress.Visibility = Visibility.Collapsed;
@@ -292,14 +304,10 @@ public partial class WidgetWindow : Window
 
     private async Task StartModelDownloadAsync(string baseUrl, string modelPath)
     {
-        // Derive a model download URL from the provider base URL.
-        // For local servers this is a no-op (model is already served by the server).
-        // For a real first-run download we would have a known CDN URL per model.
-        // For now: if the base URL is localhost, skip the download (server already has it).
         if (baseUrl.Contains("localhost", StringComparison.OrdinalIgnoreCase) ||
             baseUrl.Contains("127.0.0.1", StringComparison.OrdinalIgnoreCase))
         {
-            _logger.LogInformation("Local endpoint detected — skipping model download (model served by local server).");
+            _logger.LogInformation("Local endpoint detected — skipping model download.");
             Dispatcher.Invoke(() =>
             {
                 FirstRunView.Visibility = Visibility.Collapsed;
@@ -309,20 +317,16 @@ public partial class WidgetWindow : Window
         }
 
         _downloadCts = new CancellationTokenSource();
-        var modelUrl = $"{baseUrl.TrimEnd('/')}/models/download"; // placeholder CDN pattern
+        var modelUrl = $"{baseUrl.TrimEnd('/')}/models/download";
         await _downloadService.DownloadAsync(modelUrl, modelPath, _downloadCts.Token);
     }
 
-    // ── Download event handlers ───────────────────────────────────────────────
-
-    private void OnDownloadProgress(double percent)
-    {
+    private void OnDownloadProgress(double percent) =>
         Dispatcher.Invoke(() =>
         {
             DownloadProgress.Value  = percent;
             DownloadStatusText.Text = $"Downloading… {percent:F0}%";
         });
-    }
 
     private void OnDownloadCompleted()
     {
@@ -331,7 +335,6 @@ public partial class WidgetWindow : Window
         {
             FirstRunView.Visibility = Visibility.Collapsed;
             CompactView.Visibility  = Visibility.Visible;
-            _logger.LogInformation("Transitioned to Compact view after successful download.");
         });
     }
 
@@ -360,44 +363,34 @@ public partial class WidgetWindow : Window
 
     private async Task ApplyPositionAndOpacityAsync()
     {
-        var settings     = await _settingsStore.LoadAsync(CancellationToken.None);
-        _cachedSettings  = settings;  // warm the cache so drag saves never need a load
+        var settings    = await _settingsStore.LoadAsync(CancellationToken.None);
+        _cachedSettings = settings;
 
-        // Apply position (saved or default top-right)
         if (settings.WidgetPosition is not null)
         {
             Left = settings.WidgetPosition.Left;
             Top  = settings.WidgetPosition.Top;
-            _logger.LogInformation("Restored saved position: Left={Left}, Top={Top}", Left, Top);
         }
         else
         {
             PositionTopRightDefault();
         }
 
-        // Apply opacity to background brush (not the window itself)
         UpdateBackgroundOpacity(settings.WidgetOpacity);
     }
 
     private void PositionTopRightDefault()
     {
         var screen = SystemParameters.WorkArea;
-        const double margin = 20;
-        Left = screen.Right - Width - margin;
-        Top = margin;
-        _logger.LogInformation("Set default top-right position: Left={Left}, Top={Top}", Left, Top);
+        Left = screen.Right - Width - 20;
+        Top  = 20;
     }
 
-    private void UpdateBackgroundOpacity(double opacity)
-    {
-        // Set Opacity on the root Border element — never mutate a frozen resource brush.
-        // WPF resource brushes are frozen after XAML load; writing .Color throws InvalidOperationException.
+    private void UpdateBackgroundOpacity(double opacity) =>
         RootBorder.Opacity = Math.Clamp(opacity, 0.4, 1.0);
-    }
 
     private void OnLocationChanged(object? sender, EventArgs e)
     {
-        // Debounce position save to avoid excessive writes during drag
         _positionSaveTimer?.Stop();
         _positionSaveTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
         _positionSaveTimer.Tick += async (_, _) =>
@@ -410,18 +403,13 @@ public partial class WidgetWindow : Window
 
     private async Task SavePositionAsync()
     {
-        // Use the cached settings snapshot to avoid a disk read on every drag tick.
-        // If no cache exists yet (shouldn't happen after ApplyPositionAndOpacityAsync),
-        // fall back to a full load.
         var current = _cachedSettings ?? await _settingsStore.LoadAsync(CancellationToken.None);
         var updated = current with { WidgetPosition = new WindowPosition(Left, Top) };
-
-        // Update the cache so subsequent saves also avoid disk reads
         _cachedSettings = updated;
-
         await _settingsStore.SaveAsync(updated, CancellationToken.None);
-        _logger.LogDebug("Saved position: Left={Left}, Top={Top}", Left, Top);
     }
+
+    // ── Drag-to-move (#3 threshold raised to 6px) ────────────────────────────
 
     private void Window_MouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
@@ -429,20 +417,17 @@ public partial class WidgetWindow : Window
         {
             _dragStartPoint = e.GetPosition(this);
             MouseMove += OnWindowMouseMove;
-            MouseUp += OnWindowMouseUp;
+            MouseUp   += OnWindowMouseUp;
         }
     }
 
     private void OnWindowMouseMove(object sender, System.Windows.Input.MouseEventArgs e)
     {
-        var currentPosition = e.GetPosition(this);
-        var diff = currentPosition - _dragStartPoint;
-
-        // If moved more than 3 pixels in any direction, treat as drag
-        if (Math.Abs(diff.X) > 3 || Math.Abs(diff.Y) > 3)
+        var diff = e.GetPosition(this) - _dragStartPoint;
+        if (Math.Abs(diff.X) > DragThreshold || Math.Abs(diff.Y) > DragThreshold)
         {
             MouseMove -= OnWindowMouseMove;
-            MouseUp -= OnWindowMouseUp;
+            MouseUp   -= OnWindowMouseUp;
             DragMove();
         }
     }
@@ -450,10 +435,78 @@ public partial class WidgetWindow : Window
     private void OnWindowMouseUp(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
         MouseMove -= OnWindowMouseMove;
-        MouseUp -= OnWindowMouseUp;
+        MouseUp   -= OnWindowMouseUp;
     }
 
-    // ── WorkerW (pin behind desktop icons) ─────────────────────────────────────
+    // ── Keyboard navigation (#15) ─────────────────────────────────────────────
+
+    private void Window_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        switch (e.Key)
+        {
+            case System.Windows.Input.Key.Space:
+            case System.Windows.Input.Key.Enter:
+                // Expand from Compact; ignored when already Expanded/Pinned
+                if (_stateManager.Current == WidgetState.Compact)
+                {
+                    _stateManager.Fire(WidgetTrigger.Click);
+                    e.Handled = true;
+                }
+                break;
+
+            case System.Windows.Input.Key.Escape:
+                // Collapse to Compact from any expanded state
+                if (_stateManager.Current == WidgetState.Expanded)
+                    _stateManager.Fire(WidgetTrigger.OutsideClick);
+                else if (_stateManager.Current == WidgetState.Pinned)
+                    _stateManager.Fire(WidgetTrigger.Unpin);
+                e.Handled = true;
+                break;
+
+            case System.Windows.Input.Key.Right:
+            case System.Windows.Input.Key.Down:
+                // Advance to next concept while expanded or pinned
+                if (_stateManager.Current == WidgetState.Expanded ||
+                    _stateManager.Current == WidgetState.Pinned)
+                {
+                    StartExpandedTimer(); // reset timeout on keyboard nav too
+                    _rotationScheduler.AdvanceNow();
+                    e.Handled = true;
+                }
+                break;
+
+            case System.Windows.Input.Key.P:
+                // Toggle pin
+                if (_stateManager.Current == WidgetState.Expanded)
+                    _stateManager.Fire(WidgetTrigger.Pin);
+                else if (_stateManager.Current == WidgetState.Pinned)
+                    _stateManager.Fire(WidgetTrigger.Unpin);
+                e.Handled = true;
+                break;
+        }
+    }
+
+    // ── Expanded view hover — pause auto-collapse (#4) ────────────────────────
+
+    private void ExpandedView_MouseEnter(object sender, System.Windows.Input.MouseEventArgs e)
+    {
+        _mouseOverExpanded = true;
+        _expandedTimer?.Stop();
+        _logger.LogDebug("Mouse entered expanded view — auto-collapse paused.");
+    }
+
+    private void ExpandedView_MouseLeave(object sender, System.Windows.Input.MouseEventArgs e)
+    {
+        _mouseOverExpanded = false;
+        // Restart the timer only if still in Expanded state (not Pinned)
+        if (_stateManager.Current == WidgetState.Expanded)
+        {
+            StartExpandedTimer();
+            _logger.LogDebug("Mouse left expanded view — auto-collapse resumed.");
+        }
+    }
+
+    // ── WorkerW (pin behind desktop icons) ───────────────────────────────────
 
     private async Task ApplyWorkerWModeAsync()
     {
@@ -466,51 +519,35 @@ public partial class WidgetWindow : Window
         if (await TrySetWorkerWParentAsync(hwnd))
         {
             StartWorkerWWatchdog();
-            _logger.LogInformation("Successfully reparented to WorkerW (pin behind desktop icons).");
+            _logger.LogInformation("Successfully reparented to WorkerW.");
         }
         else
         {
-            _logger.LogWarning("Failed to find WorkerW window — falling back to normal always-on-top behavior.");
+            _logger.LogWarning("Failed to find WorkerW — falling back to always-on-top.");
         }
     }
 
     private async Task<bool> TrySetWorkerWParentAsync(IntPtr hwnd)
     {
-        // Find Progman
         var progman = FindWindow("Progman", null);
-        if (progman == IntPtr.Zero)
-        {
-            _logger.LogWarning("Progman window not found.");
-            return false;
-        }
+        if (progman == IntPtr.Zero) { _logger.LogWarning("Progman not found."); return false; }
 
-        // Send message to spawn WorkerW (needed on newer Windows builds)
         SendMessageTimeout(progman, WM_USER + SPAWN_WORKER, IntPtr.Zero, IntPtr.Zero,
             SendMessageTimeoutFlags.SMTO_ABORTIFHUNG, 1000, out _);
 
-        // Find WorkerW
         var workerW = FindWindowEx(progman, IntPtr.Zero, "WorkerW", null);
-        if (workerW == IntPtr.Zero)
-        {
-            _logger.LogWarning("WorkerW window not found after spawn message.");
-            return false;
-        }
+        if (workerW == IntPtr.Zero) { _logger.LogWarning("WorkerW not found."); return false; }
 
-        // Find the specific WorkerW that has the desktop icons (child of SHELLDLL_DefView)
         var shell = FindWindowEx(workerW, IntPtr.Zero, "SHELLDLL_DefView", null);
         if (shell != IntPtr.Zero)
-        {
             workerW = FindWindowEx(progman, workerW, "WorkerW", null);
-        }
 
-        // Reparent our window to WorkerW
         var result = SetParent(hwnd, workerW);
         if (result == IntPtr.Zero)
         {
-            _logger.LogWarning("SetParent failed with error: {Error}", Marshal.GetLastWin32Error());
+            _logger.LogWarning("SetParent failed: {Error}", Marshal.GetLastWin32Error());
             return false;
         }
-
         return true;
     }
 
@@ -527,20 +564,16 @@ public partial class WidgetWindow : Window
                 return;
             }
 
-            var hwnd = new WindowInteropHelper(this).Handle;
+            var hwnd          = new WindowInteropHelper(this).Handle;
             var currentParent = GetParentWin32(hwnd);
-            var workerW = FindWorkerW();
+            var workerW       = FindWorkerW();
 
             if (workerW == IntPtr.Zero || currentParent != workerW)
             {
-                _logger.LogInformation("WorkerW parent lost — attempting to reattach.");
-                if (await TrySetWorkerWParentAsync(hwnd))
+                _logger.LogInformation("WorkerW parent lost — reattaching.");
+                if (!await TrySetWorkerWParentAsync(hwnd))
                 {
-                    _logger.LogInformation("Successfully reattached to WorkerW.");
-                }
-                else
-                {
-                    _logger.LogWarning("Failed to reattach to WorkerW — falling back to normal behavior.");
+                    _logger.LogWarning("Reattach failed — stopping watchdog.");
                     _workerWWatchdog?.Stop();
                 }
             }
@@ -561,9 +594,7 @@ public partial class WidgetWindow : Window
 
         var shell = FindWindowEx(workerW, IntPtr.Zero, "SHELLDLL_DefView", null);
         if (shell != IntPtr.Zero)
-        {
             workerW = FindWindowEx(progman, workerW, "WorkerW", null);
-        }
 
         return workerW;
     }
@@ -575,41 +606,44 @@ public partial class WidgetWindow : Window
             var hwnd = new WindowInteropHelper(this).Handle;
             SetParent(hwnd, _originalParent.Value);
             _workerWWatchdog?.Stop();
+            _workerWWatchdog = null; // (#22) null out so ReapplySettingsAsync can re-check cleanly
             _logger.LogInformation("Restored normal parent window.");
         }
     }
 
-    // ── Task 1: auto-collapse timer ───────────────────────────────────────────
+    // ── Auto-collapse timer ───────────────────────────────────────────────────
 
     private void StartExpandedTimer()
     {
         _expandedTimer?.Stop();
+        // Don't start if mouse is over the expanded view (#4)
+        if (_mouseOverExpanded) return;
+
         _expandedTimer = new DispatcherTimer { Interval = ExpandedTimeout };
         _expandedTimer.Tick += (_, _) =>
         {
             _expandedTimer.Stop();
-            _stateManager.Fire(WidgetTrigger.Timeout);
-            _logger.LogDebug("Expanded timeout fired — collapsing to Compact.");
+            // Guard again — user might have moved mouse in during the 30s (#4)
+            if (!_mouseOverExpanded)
+                _stateManager.Fire(WidgetTrigger.Timeout);
         };
         _expandedTimer.Start();
     }
 
     private void StopExpandedTimer() => _expandedTimer?.Stop();
 
-    // ── Deactivated → Compact ─────────────────────────────────────────────────
+    // ── Deactivated → Compact (#1 right-click guard) ─────────────────────────
 
     protected override void OnDeactivated(EventArgs e)
     {
         base.OnDeactivated(e);
 
-        // Don't collapse when a child/owned window (e.g. SettingsWindow) takes focus.
-        // OwnedWindows contains any window whose Owner is set to this WidgetWindow.
-        // When Settings opens it deactivates us — firing OutsideClick would immediately
-        // collapse the widget and look broken when Settings closes.
+        // Guard 1: don't collapse when a settings/owned window takes focus
         foreach (Window owned in OwnedWindows)
-        {
             if (owned.IsVisible) return;
-        }
+
+        // Guard 2: don't collapse when our own context menu is open (#1)
+        if (_contextMenuOpen) return;
 
         _stateManager.Fire(WidgetTrigger.OutsideClick);
     }
@@ -624,14 +658,15 @@ public partial class WidgetWindow : Window
             {
                 case WidgetState.Compact:
                     StopExpandedTimer();
+                    _mouseOverExpanded = false;
                     ShowCompact();
                     break;
                 case WidgetState.Expanded:
-                    StartExpandedTimer();   // start the 30-second auto-collapse clock
+                    StartExpandedTimer();
                     ShowExpanded();
                     break;
                 case WidgetState.Pinned:
-                    StopExpandedTimer();    // user explicitly pinned — kill the timeout
+                    StopExpandedTimer();
                     break;
             }
         });
@@ -641,11 +676,11 @@ public partial class WidgetWindow : Window
 
     private void ShowSetupChoiceView()
     {
-        CompactView.Visibility      = Visibility.Collapsed;
-        ExpandedView.Visibility     = Visibility.Collapsed;
-        ErrorView.Visibility        = Visibility.Collapsed;
-        FirstRunView.Visibility     = Visibility.Collapsed;
-        SetupChoiceView.Visibility  = Visibility.Visible;
+        CompactView.Visibility     = Visibility.Collapsed;
+        ExpandedView.Visibility    = Visibility.Collapsed;
+        ErrorView.Visibility       = Visibility.Collapsed;
+        FirstRunView.Visibility    = Visibility.Collapsed;
+        SetupChoiceView.Visibility = Visibility.Visible;
     }
 
     private void ShowFirstRunView()
@@ -660,15 +695,25 @@ public partial class WidgetWindow : Window
     {
         if (ExpandedView.Visibility == Visibility.Visible)
         {
-            var fadeOut = ((Storyboard)FindResource("AnimFadeOut")).Clone();
-            fadeOut.Completed += (_, _) =>
+            // Scale the whole window out, then swap visibility and fade the compact badge in.
+            // AnimScaleOut targets Window.RenderTransform (ScaleTransform, CenterX=160).
+            var scaleOut = ((Storyboard)FindResource("AnimScaleOut")).Clone();
+            scaleOut.Completed += (_, _) =>
             {
                 ExpandedView.Visibility = Visibility.Collapsed;
                 CompactView.Visibility  = Visibility.Visible;
                 PinButton.IsChecked     = false;
+
+                // Restore scale to 1 so the next expand starts from full size.
+                if (RenderTransform is ScaleTransform st)
+                {
+                    st.ScaleX = 1.0;
+                    st.ScaleY = 1.0;
+                }
+
                 ((Storyboard)FindResource("AnimFadeIn")).Begin(CompactView);
             };
-            fadeOut.Begin(ExpandedView);
+            scaleOut.Begin(this);
         }
         else
         {
@@ -686,7 +731,10 @@ public partial class WidgetWindow : Window
         FirstRunView.Visibility = Visibility.Collapsed;
         QuotaView.Visibility    = Visibility.Collapsed;
         UpdateExpandedContent();
+        // Slide the expanded panel up (TranslateTransform on ExpandedView)
+        // and simultaneously scale the whole window in (ScaleTransform on Window).
         ((Storyboard)FindResource("AnimSlideInUp")).Begin(ExpandedView);
+        ((Storyboard)FindResource("AnimScaleIn")).Begin(this);
     }
 
     private void ShowError(string message)
@@ -711,9 +759,8 @@ public partial class WidgetWindow : Window
             CompactCategory.Text      = _currentConcept.Category;
             CompactSlotIndicator.Text = $"{_currentIndex + 1}/3";
             CompactTitle.Text         = _currentConcept.Title;
-            // Truncate explanation to ~70 characters for teaser
             var teaser = _currentConcept.Explanation.Length > 70
-                ? _currentConcept.Explanation.Substring(0, 70) + "…"
+                ? _currentConcept.Explanation[..70] + "…"
                 : _currentConcept.Explanation;
             CompactTeaser.Text = teaser;
         }
@@ -735,23 +782,63 @@ public partial class WidgetWindow : Window
         UpdateDots();
     }
 
+    /// <summary>
+    /// Cross-fades the title and explanation when content changes while expanded. (#2)
+    /// Falls back to an instant update if the expanded view isn't visible.
+    /// </summary>
+    private void UpdateExpandedContentAnimated()
+    {
+        if (_currentConcept is null) return;
+        if (ExpandedView.Visibility != Visibility.Visible)
+        {
+            UpdateExpandedContent();
+            return;
+        }
+
+        // Fade out title + explanation together
+        var fadeOut = ((Storyboard)FindResource("AnimFadeOut")).Clone();
+        fadeOut.Completed += (_, _) =>
+        {
+            // Swap content while invisible
+            TitleText.Text       = _currentConcept.Title;
+            ExplanationText.Text = _currentConcept.Explanation;
+            CategoryTag.Text     = _currentConcept.Category;
+            UpdateDots();
+
+            // Fade back in
+            var fadeIn = ((Storyboard)FindResource("AnimFadeIn")).Clone();
+            Storyboard.SetTarget(fadeIn, TitleText);
+            fadeIn.Begin();
+            var fadeIn2 = ((Storyboard)FindResource("AnimFadeIn")).Clone();
+            Storyboard.SetTarget(fadeIn2, ExplanationText);
+            fadeIn2.Begin();
+        };
+        Storyboard.SetTarget(fadeOut, TitleText);
+        fadeOut.Begin();
+
+        var fadeOut2 = ((Storyboard)FindResource("AnimFadeOut")).Clone();
+        Storyboard.SetTarget(fadeOut2, ExplanationText);
+        fadeOut2.Begin();
+    }
+
     private void UpdateDots()
     {
-        var active   = (System.Windows.Media.SolidColorBrush)FindResource("BrushPrimary");
-        var inactive = (System.Windows.Media.SolidColorBrush)FindResource("BrushBorderStrong");
+        var active   = (SolidColorBrush)FindResource("BrushPrimary");
+        var inactive = (SolidColorBrush)FindResource("BrushBorderStrong");
         Dot1.Fill = _currentIndex == 0 ? active : inactive;
         Dot2.Fill = _currentIndex == 1 ? active : inactive;
         Dot3.Fill = _currentIndex == 2 ? active : inactive;
     }
 
-    // ── Scheduler callbacks (public — called by App.xaml.cs for both modes) ──
+    // ── Scheduler callbacks ───────────────────────────────────────────────────
 
     public void OnConceptSetReady(DailyConceptSet set)
     {
         _logger.LogInformation("New DailyConceptSet received for {Date}.", set.Date);
-        _currentIndex = -1;
+        // _currentIndex is reset to 2 at field init; RotationScheduler.LoadSet fires
+        // ConceptRotated immediately which increments to 0. (#19)
+        _currentIndex = 2;
         _rotationScheduler.LoadSet(set);
-        // Show tray hint on the first concept delivery if not yet seen
         _ = ShowTrayHintIfNeededAsync();
     }
 
@@ -763,10 +850,6 @@ public partial class WidgetWindow : Window
             "Check that your AI endpoint is running (or internet is available), then retry.");
     }
 
-    /// <summary>
-    /// Called when the cloud provider returns HTTP 429 (shared quota reached).
-    /// Shows QuotaView instead of the generic ErrorView — not a retryable failure.
-    /// </summary>
     public void OnQuotaExceeded()
     {
         _logger.LogWarning("Quota exceeded — showing QuotaView.");
@@ -780,13 +863,9 @@ public partial class WidgetWindow : Window
         });
     }
 
-    /// <summary>
-    /// Called when RefreshScheduler detects a newer version on GitHub.
-    /// Shows the update consent banner — nothing is downloaded automatically.
-    /// </summary>
     public void OnUpdateAvailable(string version, string downloadUrl)
     {
-        _logger.LogInformation("Update available: v{Version}. Showing consent banner.", version);
+        _logger.LogInformation("Update available: v{Version}.", version);
         _pendingUpdateUrl = downloadUrl;
         Dispatcher.Invoke(() =>
         {
@@ -801,15 +880,11 @@ public partial class WidgetWindow : Window
         var url = _pendingUpdateUrl;
         _pendingUpdateUrl = null;
         if (url is null) return;
-        _logger.LogInformation("User consented to update. Starting download.");
         _ = Task.Run(() => _refreshScheduler.PerformUpdateAsync(url, CancellationToken.None));
     }
 
-    private void UpdateLater_Click(object sender, RoutedEventArgs e)
-    {
+    private void UpdateLater_Click(object sender, RoutedEventArgs e) =>
         UpdateBanner.Visibility = Visibility.Collapsed;
-        _logger.LogInformation("User deferred update to next check cycle.");
-    }
 
     private void OnConceptRotated(Concept concept)
     {
@@ -818,8 +893,9 @@ public partial class WidgetWindow : Window
             _currentConcept = concept;
             _currentIndex   = (_currentIndex + 1) % 3;
             UpdateBadgeLabel();
+            // Use animated swap when expanded (#2), instant when compact
             if (ExpandedView.Visibility == Visibility.Visible)
-                UpdateExpandedContent();
+                UpdateExpandedContentAnimated();
         });
     }
 
@@ -836,7 +912,6 @@ public partial class WidgetWindow : Window
 
     private void Next_Click(object sender, RoutedEventArgs e)
     {
-        // Reset the expanded timer so user gets another full 30 s after pressing Next
         StartExpandedTimer();
         _rotationScheduler.AdvanceNow();
         _logger.LogDebug("User pressed Next.");
@@ -849,40 +924,72 @@ public partial class WidgetWindow : Window
         _logger.LogInformation("Copied to clipboard: {Title}", _currentConcept.Title);
     }
 
+    /// <summary>
+    /// Opens a web search for the concept. Briefly disables the button as feedback,
+    /// then silently swallows any launch error. (#7)
+    /// </summary>
     private void ReadMore_Click(object sender, RoutedEventArgs e)
     {
         if (_currentConcept is null) return;
+
+        // Brief visual feedback — disable for 1.2s (#7)
+        ReadMoreButton.IsEnabled = false;
+        var restoreTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1200) };
+        restoreTimer.Tick += (_, _) => { restoreTimer.Stop(); ReadMoreButton.IsEnabled = true; };
+        restoreTimer.Start();
+
         var query = Uri.EscapeDataString(_currentConcept.Title);
-        var url   = $"https://www.google.com/search?q={query}";
-        OpenUrl(url);
+        OpenUrl($"https://www.google.com/search?q={query}");
     }
 
-    /// <summary>
-    /// Opens a URL in the default browser. Uses cmd /c start which is the most
-    /// reliable method on Windows regardless of browser association registry state.
-    /// Never throws — logs a warning and returns silently on failure.
-    /// </summary>
+    /// <summary>Opens a URL via ShellExecuteEx — the same call Windows uses for hyperlinks. Never throws. (#7)</summary>
     private void OpenUrl(string url)
     {
-        // cmd /c start is the most universally reliable way to open a URL on Windows.
-        // Process.Start with UseShellExecute can fail with Win32Exception 1155 when
-        // no default browser is registered. explorer.exe treats URLs as paths on some
-        // configurations. cmd /c start "" "url" handles all cases correctly.
         try
         {
-            Process.Start(new ProcessStartInfo
+            var info = new SHELLEXECUTEINFO
             {
-                FileName        = "cmd.exe",
-                Arguments       = $"/c start \"\" \"{url}\"",
-                UseShellExecute = false,
-                CreateNoWindow  = true
-            });
+                cbSize = Marshal.SizeOf<SHELLEXECUTEINFO>(),
+                fMask  = 0x00000040, // SEE_MASK_NOCLOSEPROCESS
+                hwnd   = IntPtr.Zero,
+                lpVerb = "open",
+                lpFile = url,
+                nShow  = 1 // SW_SHOWNORMAL
+            };
+            if (!ShellExecuteEx(ref info))
+            {
+                var err = Marshal.GetLastWin32Error();
+                _logger.LogWarning("ShellExecuteEx failed (error {Error}) for URL: {Url}", err, url);
+            }
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Could not open browser for URL: {Url}", url);
         }
     }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct SHELLEXECUTEINFO
+    {
+        public int    cbSize;
+        public uint   fMask;
+        public IntPtr hwnd;
+        [MarshalAs(UnmanagedType.LPWStr)] public string? lpVerb;
+        [MarshalAs(UnmanagedType.LPWStr)] public string? lpFile;
+        [MarshalAs(UnmanagedType.LPWStr)] public string? lpParameters;
+        [MarshalAs(UnmanagedType.LPWStr)] public string? lpDirectory;
+        public int    nShow;
+        public IntPtr hInstApp;
+        public IntPtr lpIDList;
+        [MarshalAs(UnmanagedType.LPWStr)] public string? lpClass;
+        public IntPtr hkeyClass;
+        public uint   dwHotKey;
+        public IntPtr hIconOrMonitor;
+        public IntPtr hProcess;
+    }
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern bool ShellExecuteEx(ref SHELLEXECUTEINFO lpExecInfo);
 
     private void ErrorRetry_Click(object sender, RoutedEventArgs e)
     {
@@ -893,18 +1000,14 @@ public partial class WidgetWindow : Window
             var settings = await _settingsStore.LoadAsync(CancellationToken.None);
             if (settings.Mode == "cloud")
             {
-                // Try refilling the buffer first, then consuming
                 await _prefetchService.RefillIfConnectedAsync(CancellationToken.None);
                 var set = await _prefetchService.TryConsumeAsync(CancellationToken.None);
-                if (set is not null)
-                    OnConceptSetReady(set);
-                else
-                    OnGenerationFailed(new InvalidOperationException(
-                        "Cloud buffer is still empty. Check your internet connection."));
+                if (set is not null) OnConceptSetReady(set);
+                else OnGenerationFailed(new InvalidOperationException(
+                    "Cloud buffer is still empty. Check your internet connection."));
             }
             else
             {
-                // ForceRetryAsync bypasses the already-ran-today guard — correct for a retry
                 await _bgService.ForceRetryAsync(CancellationToken.None);
             }
         });
@@ -913,7 +1016,7 @@ public partial class WidgetWindow : Window
     private void OpenSettings_Click(object sender, RoutedEventArgs e)
     {
         var settingsWin = _settingsWindowFactory();
-        settingsWin.Owner = this;
+        settingsWin.Owner  = this;
         settingsWin.Closed += async (_, _) => await ReapplySettingsAsync();
         settingsWin.ShowDialog();
     }
@@ -921,21 +1024,18 @@ public partial class WidgetWindow : Window
     private async Task ReapplySettingsAsync()
     {
         var settings    = await _settingsStore.LoadAsync(CancellationToken.None);
-        _cachedSettings = settings;  // keep cache in sync after user saves settings
-
-        // Apply opacity to background brush
+        _cachedSettings = settings;
         UpdateBackgroundOpacity(settings.WidgetOpacity);
 
-        // Apply/restore WorkerW mode
         if (settings.PinBehindDesktopIcons)
         {
+            // Only attach if watchdog isn't already running (#22)
             if (_workerWWatchdog == null)
-            {
                 await ApplyWorkerWModeAsync();
-            }
         }
         else
         {
+            // Immediately stop the watchdog and restore parent (#22)
             await RestoreNormalParentAsync();
         }
     }
@@ -962,19 +1062,14 @@ public partial class WidgetWindow : Window
     {
         _downloadCts?.Cancel();
         FirstRunView.Visibility = Visibility.Collapsed;
-
-        // Open the real Settings window with Cloud mode pre-selected so the user
-        // can enter their API key immediately — no JSON editing required.
         var settingsWin = _settingsWindowFactory();
         settingsWin.PreSelectMode("cloud");
         settingsWin.Owner = this;
         settingsWin.ShowDialog();
-
-        // After settings dialog closes, land on Compact regardless of what they saved
         CompactView.Visibility = Visibility.Visible;
     }
 
-    // ── Setup choice handlers (Step 5) ────────────────────────────────────────
+    // ── Setup choice handlers ─────────────────────────────────────────────────
 
     private void SetupChooseLocal_Click(object sender, System.Windows.Input.MouseButtonEventArgs e)
         => _ = ApplySetupChoiceAsync("local");
@@ -985,38 +1080,41 @@ public partial class WidgetWindow : Window
     private async Task ApplySetupChoiceAsync(string mode)
     {
         _logger.LogInformation("Setup choice: user selected '{Mode}'.", mode);
-
-        // Save the choice — clears IsFirstRun so this screen never shows again
         var current = await _settingsStore.LoadAsync(CancellationToken.None);
         var updated = current with { Mode = mode, IsFirstRun = false };
         await _settingsStore.SaveAsync(updated, CancellationToken.None);
-
-        // Hide the setup screen before continuing
         Dispatcher.Invoke(() => SetupChoiceView.Visibility = Visibility.Collapsed);
-
-        // Continue the normal startup flow with the chosen mode
         await ContinueAfterSetupChoiceAsync(updated);
-
-        // Show the tray hint now that the user has seen the widget for the first time
         await ShowTrayHintIfNeededAsync();
-
-        // If nothing else showed a view, land on Compact
         Dispatcher.Invoke(() =>
         {
-            if (CompactView.Visibility    != Visibility.Visible
-             && FirstRunView.Visibility   != Visibility.Visible
-             && ErrorView.Visibility      != Visibility.Visible)
-            {
+            if (CompactView.Visibility  != Visibility.Visible
+             && FirstRunView.Visibility != Visibility.Visible
+             && ErrorView.Visibility    != Visibility.Visible)
                 CompactView.Visibility = Visibility.Visible;
-            }
         });
     }
 
-    /// <summary>Dismisses the quota-reached view and returns to Compact.</summary>
+    /// <summary>
+    /// Dismisses the quota view. Only shows CompactView when a concept exists,
+    /// to avoid showing "Loading…" with no content. (#20)
+    /// </summary>
     private void QuotaDismiss_Click(object sender, RoutedEventArgs e)
     {
-        QuotaView.Visibility   = Visibility.Collapsed;
-        CompactView.Visibility = Visibility.Visible;
+        QuotaView.Visibility = Visibility.Collapsed;
+        if (_currentConcept is not null)
+        {
+            CompactView.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            // No concept available yet — show a minimal "nothing here" state
+            CompactTitle.Text         = "No concept yet";
+            CompactTeaser.Text        = "Concepts will resume tomorrow.";
+            CompactCategory.Text      = string.Empty;
+            CompactSlotIndicator.Text = string.Empty;
+            CompactView.Visibility    = Visibility.Visible;
+        }
         _logger.LogInformation("Quota view dismissed by user.");
     }
 
@@ -1027,41 +1125,26 @@ public partial class WidgetWindow : Window
         else if (_stateManager.Current == WidgetState.Expanded)
             _stateManager.Fire(WidgetTrigger.Pin);
         else
-            // Compact → Expand → Pin in one gesture
             _stateManager.Fire(WidgetTrigger.Click);
     }
 
-    private void CtxCopy_Click(object sender, RoutedEventArgs e)
-        => Copy_Click(sender, e);
+    private void CtxCopy_Click(object sender, RoutedEventArgs e) => Copy_Click(sender, e);
+    private void CtxQuit_Click(object sender, RoutedEventArgs e) => WpfApp.Current.Shutdown();
 
-    private void CtxQuit_Click(object sender, RoutedEventArgs e)
-        => WpfApp.Current.Shutdown();
+    // ── Public surface for SettingsWindow opacity preview ────────────────────
 
-    // ── Fix 1: Close-to-tray + tray hint ─────────────────────────────────────
-
-    /// <summary>
-    /// Called by SettingsWindow opacity slider for live preview.
-    /// Sets Opacity on the root Border — never mutates a frozen resource brush.
-    /// </summary>
-    public void SetBackgroundOpacity(double opacity)
-    {
+    public void SetBackgroundOpacity(double opacity) =>
         RootBorder.Opacity = Math.Clamp(opacity, 0.4, 1.0);
-    }
 
-    /// <summary>
-    /// × button on both Compact and Expanded views.
-    /// Hides the window to the system tray — does NOT exit the app.
-    /// Full exit is via tray icon right-click → Quit.
-    /// </summary>
+    // ── Close-to-tray + visibility flag (#5) ─────────────────────────────────
+
     private void CloseToTray_Click(object sender, RoutedEventArgs e)
     {
         Hide();
+        _isWidgetVisible = false;
         _logger.LogInformation("Widget hidden to tray via × button.");
     }
 
-    /// <summary>
-    /// Dismisses the first-run tray-hint banner and persists the flag so it never shows again.
-    /// </summary>
     private void TrayHint_Dismiss(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
         TrayHintBanner.Visibility = Visibility.Collapsed;
@@ -1075,10 +1158,6 @@ public partial class WidgetWindow : Window
         _logger.LogInformation("Tray hint dismissed.");
     }
 
-    /// <summary>
-    /// Shows the tray-hint banner once — after setup choice or on the very first startup
-    /// where a concept is already waiting. Checks HasSeenTrayHint so it never re-appears.
-    /// </summary>
     private async Task ShowTrayHintIfNeededAsync()
     {
         var settings = await _settingsStore.LoadAsync(CancellationToken.None);

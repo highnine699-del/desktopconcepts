@@ -108,7 +108,7 @@ public sealed class RefreshScheduler : BackgroundService
             using var http = _httpFactory.CreateClient("GitHubUpdate");
 
             const string apiUrl =
-                "https://api.github.com/repos/highnine699-del/quire-app/releases/latest";
+                "https://api.github.com/repos/highnine699-del/Quire/releases/latest";
 
             var response = await http.GetAsync(apiUrl, cancellationToken);
             if (!response.IsSuccessStatusCode)
