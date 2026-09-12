@@ -141,9 +141,28 @@ public sealed class JsonConceptBufferStore : IConceptBufferStore
 
     private async Task SaveBufferAsync(BufferFile buffer, CancellationToken cancellationToken)
     {
-        Directory.CreateDirectory(System.IO.Path.GetDirectoryName(_path)!);
-        await using var stream = File.Create(_path);
-        await JsonSerializer.SerializeAsync(stream, buffer, JsonOpts, cancellationToken);
+        var dir      = System.IO.Path.GetDirectoryName(_path)!;
+        Directory.CreateDirectory(dir);
+
+        // Atomic write: serialise to a temp file then replace the real file in one operation.
+        // Matches the pattern used by JsonSettingsStore — prevents a corrupt/empty buffer.json
+        // if the process is killed mid-write.
+        var tempPath = System.IO.Path.Combine(dir, System.IO.Path.GetRandomFileName());
+        try
+        {
+            await using (var stream = File.Create(tempPath))
+            {
+                await JsonSerializer.SerializeAsync(stream, buffer, JsonOpts, cancellationToken);
+                await stream.FlushAsync(cancellationToken);
+            }
+
+            File.Move(tempPath, _path, overwrite: true);
+        }
+        catch
+        {
+            try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch { /* best-effort */ }
+            throw;
+        }
     }
 
     // ── JSON DTOs (internal to this file) ────────────────────────────────────

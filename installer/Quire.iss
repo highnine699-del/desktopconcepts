@@ -5,8 +5,8 @@
 #define AppPublisher   "Kevwe"
 #define AppVersion     "1.0.11"
 #define AppExeName     "Quire.exe"
-#define AppPublisherURL "https://github.com/highnine699-del/quire-app"
-#define AppSupportURL  "https://github.com/highnine699-del/quire-app/issues"
+#define AppPublisherURL "https://github.com/highnine699-del/Quire"
+#define AppSupportURL  "https://github.com/highnine699-del/Quire/issues"
 
 [Setup]
 ; ── Identity ──────────────────────────────────────────────────────────────────
@@ -85,8 +85,7 @@ Filename: "{app}\{#AppExeName}"; Description: "Launch {#AppName}"; Flags: nowait
 
 [UninstallRun]
 ; Gracefully ask the app to close before uninstalling.
-; PostMessage WM_CLOSE (0x0010) is the polite way — no forceful kill, no cmd.exe.
-; RunOnceId ensures this runs exactly once during uninstall.
-Filename: "{cmd}"; Parameters: "/c taskkill /IM {#AppExeName} /T"; \
-    Flags: runhidden; RunOnceId: "CloseQuire"
+; Uses taskkill /F /IM to force-close if still running.
+; RunOnceId ensures this fires exactly once per uninstall. (#6 audit fix)
+Filename: "{cmd}"; Parameters: "/c taskkill /F /IM {#AppExeName} /T"; Flags: runhidden; RunOnceId: "CloseQuire"
 

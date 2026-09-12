@@ -387,7 +387,7 @@ public partial class WidgetWindow : Window
     }
 
     private void UpdateBackgroundOpacity(double opacity) =>
-        RootBorder.Opacity = Math.Clamp(opacity, 0.4, 1.0);
+        RootBorder.Opacity = Math.Clamp(opacity, 0.5, 1.0);
 
     private void OnLocationChanged(object? sender, EventArgs e)
     {

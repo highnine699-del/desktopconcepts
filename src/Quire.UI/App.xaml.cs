@@ -76,6 +76,13 @@ public partial class App : System.Windows.Application
                     client.Timeout = TimeSpan.FromMinutes(10);
                 });
 
+                // Lightweight connectivity probe client for CloudPrefetchService (#8 audit fix)
+                // Short 5s timeout — only needs a HEAD response, not a body.
+                services.AddHttpClient("ConnectivityProbe", client =>
+                {
+                    client.Timeout = TimeSpan.FromSeconds(5);
+                });
+
                 // ── Application ───────────────────────────────────────────────
                 services.AddSingleton<WidgetStateManager>();
                 services.AddSingleton<DailyConceptScheduler>();

@@ -25,23 +25,26 @@ public class CloudPrefetchService
     private readonly IConceptBufferStore   _buffer;
     private readonly IConceptHistoryStore  _history;
     private readonly ISettingsStore        _settings;
+    private readonly IHttpClientFactory    _httpFactory;
     private readonly ILogger<CloudPrefetchService> _logger;
 
     // Prevents concurrent refills racing each other
     private int _refillInProgress; // 0 = idle, 1 = running (Interlocked)
 
     public CloudPrefetchService(
-        IConceptProvider             provider,
-        IConceptBufferStore          buffer,
-        IConceptHistoryStore         history,
-        ISettingsStore               settings,
+        IConceptProvider              provider,
+        IConceptBufferStore           buffer,
+        IConceptHistoryStore          history,
+        ISettingsStore                settings,
+        IHttpClientFactory            httpFactory,
         ILogger<CloudPrefetchService> logger)
     {
-        _provider = provider;
-        _buffer   = buffer;
-        _history  = history;
-        _settings = settings;
-        _logger   = logger;
+        _provider    = provider;
+        _buffer      = buffer;
+        _history     = history;
+        _settings    = settings;
+        _httpFactory = httpFactory;
+        _logger      = logger;
     }
 
     /// <summary>
@@ -198,27 +201,21 @@ public class CloudPrefetchService
 
     // ── Private helpers ───────────────────────────────────────────────────────
 
-    // Shared HttpClient for connectivity probes. HttpClient is thread-safe and
-    // designed for reuse — creating a new instance per call causes socket exhaustion.
-    // Timeout is short (5 s) since we only need a headers response, not a body.
-    private static readonly HttpClient _probeClient = new HttpClient
-    {
-        Timeout = TimeSpan.FromSeconds(5)
-    };
-
     /// <summary>
     /// Checks connectivity by sending an HTTP HEAD request to the proxy endpoint.
-    /// A DNS-only check always succeeds for Cloudflare-hosted Workers even when
-    /// the Worker itself is down — a real HTTP probe confirms the endpoint is up.
+    /// Uses IHttpClientFactory so connections are properly pooled and DNS is refreshed
+    /// when the machine changes networks (WiFi → VPN etc.). (#8 audit fix)
     /// </summary>
-    private static async Task<bool> IsInternetAvailableAsync(CancellationToken cancellationToken)
+    private async Task<bool> IsInternetAvailableAsync(CancellationToken cancellationToken)
     {
         try
         {
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             cts.CancelAfter(TimeSpan.FromSeconds(5));
 
-            var response = await _probeClient.SendAsync(
+            // Named client "ConnectivityProbe" — registered in App.xaml.cs with a 5s timeout
+            var client   = _httpFactory.CreateClient("ConnectivityProbe");
+            var response = await client.SendAsync(
                 new HttpRequestMessage(HttpMethod.Head, AppSettings.DefaultProxyBaseUrl),
                 HttpCompletionOption.ResponseHeadersRead,
                 cts.Token);
