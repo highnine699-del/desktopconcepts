@@ -1,6 +1,7 @@
 using Quire.Application.Schedulers;
 using Quire.Domain;
 using Microsoft.Extensions.Logging.Abstractions;
+using System.Net.Http;
 
 namespace Quire.Tests.Application;
 
@@ -113,16 +114,27 @@ public sealed class CloudPrefetchServiceTests
         public Task SaveAsync(AppSettings s, CancellationToken ct) => Task.CompletedTask;
     }
 
+    /// <summary>
+    /// Null IHttpClientFactory for tests — CloudPrefetchService.IsInternetAvailableAsync
+    /// is overridden in all subclasses used by tests, so no real HTTP is made.
+    /// </summary>
+    private sealed class NullHttpClientFactory : IHttpClientFactory
+    {
+        public static readonly NullHttpClientFactory Instance = new();
+        public HttpClient CreateClient(string name) => new();
+    }
+
     private static CloudPrefetchService MakeSvc(
         IConceptProvider? provider = null,
         IConceptBufferStore? buffer = null,
         IConceptHistoryStore? history = null,
         ISettingsStore? settings = null)
         => new(
-            provider  ?? new CountingProvider(),
-            buffer    ?? new InMemoryBufferStore(),
-            history   ?? new EmptyHistory(),
-            settings  ?? new CloudModeSettings(),
+            provider    ?? new CountingProvider(),
+            buffer      ?? new InMemoryBufferStore(),
+            history     ?? new EmptyHistory(),
+            settings    ?? new CloudModeSettings(),
+            NullHttpClientFactory.Instance,
             NullLogger<CloudPrefetchService>.Instance);
 
     // ── (a) 7-day prefetch = 21 unique concepts ───────────────────────────────
@@ -300,13 +312,15 @@ public sealed class CloudPrefetchServiceTests
         public NoFillPrefetchService(
             IConceptProvider p, IConceptBufferStore b,
             IConceptHistoryStore h, ISettingsStore s)
-            : base(p, b, h, s, NullLogger<CloudPrefetchService>.Instance) { }
+            : base(p, b, h, s,
+                   NullHttpClientFactory.Instance,
+                   NullLogger<CloudPrefetchService>.Instance) { }
 
         public override Task RefillIfConnectedAsync(CancellationToken ct)
-            => Task.CompletedTask; // no-op — buffer stays empty
+            => Task.CompletedTask;
 
         public override async Task FillToTargetAsync(CancellationToken ct)
-            => await Task.CompletedTask; // no-op on startup — buffer stays empty
+            => await Task.CompletedTask;
     }
 
     // ── (d) Both modes end-to-end ─────────────────────────────────────────────
@@ -357,7 +371,9 @@ public sealed class CloudPrefetchServiceTests
             IConceptHistoryStore history,
             ISettingsStore settings,
             Action onRefill)
-            : base(provider, buffer, history, settings, NullLogger<CloudPrefetchService>.Instance)
+            : base(provider, buffer, history, settings,
+                   NullHttpClientFactory.Instance,
+                   NullLogger<CloudPrefetchService>.Instance)
         {
             _onRefill = onRefill;
         }

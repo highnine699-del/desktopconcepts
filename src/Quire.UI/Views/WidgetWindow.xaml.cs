@@ -760,7 +760,7 @@ public partial class WidgetWindow : Window
         if (_currentConcept is not null)
         {
             CompactCategory.Text      = _currentConcept.Category;
-            CompactSlotIndicator.Text = $"{_currentIndex + 1}/3";
+            CompactSlotIndicator.Text = $"· {_currentIndex + 1}/3";
             CompactTitle.Text         = _currentConcept.Title;
             // Truncate at a word boundary near 70 chars — avoids mid-word ellipsis (#5)
             var teaser = TruncateAtWord(_currentConcept.Explanation, 70);
@@ -785,8 +785,11 @@ public partial class WidgetWindow : Window
     }
 
     /// <summary>
-    /// Cross-fades the title and explanation when content changes while expanded. (#2)
-    /// Falls back to an instant update if the expanded view isn't visible.
+    /// Cross-fades the title and explanation when content changes while expanded.
+    /// Fades a wrapper panel as a single unit to prevent the race condition where
+    /// two independent fade-outs complete at different times and swap content
+    /// at different moments. (#3 audit fix)
+    /// Falls back to instant update if the expanded view isn't visible.
     /// </summary>
     private void UpdateExpandedContentAnimated()
     {
@@ -797,30 +800,34 @@ public partial class WidgetWindow : Window
             return;
         }
 
-        // Fade out title + explanation together
+        // Snapshot the new content before any async gap
+        var newTitle       = _currentConcept.Title;
+        var newExplanation = _currentConcept.Explanation;
+        var newCategory    = _currentConcept.Category;
+        var newIndex       = _currentIndex;
+
+        // Fade out the whole ExpandedView content panel as one unit (#3)
         var fadeOut = ((Storyboard)FindResource("AnimFadeOut")).Clone();
+        Storyboard.SetTarget(fadeOut, ExpandedView);
         fadeOut.Completed += (_, _) =>
         {
-            // Swap content while invisible
-            TitleText.Text       = _currentConcept.Title;
-            ExplanationText.Text = _currentConcept.Explanation;
-            CategoryTag.Text     = _currentConcept.Category;
-            UpdateDots();
+            // Swap all content while fully invisible — no partial-swap flash
+            TitleText.Text       = newTitle;
+            ExplanationText.Text = newExplanation;
+            CategoryTag.Text     = newCategory;
 
-            // Fade back in
+            var active   = (SolidColorBrush)FindResource("BrushPrimary");
+            var inactive = (SolidColorBrush)FindResource("BrushBorderStrong");
+            Dot1.Fill = newIndex == 0 ? active : inactive;
+            Dot2.Fill = newIndex == 1 ? active : inactive;
+            Dot3.Fill = newIndex == 2 ? active : inactive;
+
+            // Fade the whole panel back in
             var fadeIn = ((Storyboard)FindResource("AnimFadeIn")).Clone();
-            Storyboard.SetTarget(fadeIn, TitleText);
+            Storyboard.SetTarget(fadeIn, ExpandedView);
             fadeIn.Begin();
-            var fadeIn2 = ((Storyboard)FindResource("AnimFadeIn")).Clone();
-            Storyboard.SetTarget(fadeIn2, ExplanationText);
-            fadeIn2.Begin();
         };
-        Storyboard.SetTarget(fadeOut, TitleText);
         fadeOut.Begin();
-
-        var fadeOut2 = ((Storyboard)FindResource("AnimFadeOut")).Clone();
-        Storyboard.SetTarget(fadeOut2, ExplanationText);
-        fadeOut2.Begin();
     }
 
     private void UpdateDots()
@@ -920,10 +927,18 @@ public partial class WidgetWindow : Window
         => _stateManager.Fire(WidgetTrigger.Click);
 
     private void PinButton_Checked(object sender, RoutedEventArgs e)
-        => _stateManager.Fire(WidgetTrigger.Pin);
+    {
+        _stateManager.Fire(WidgetTrigger.Pin);
+        // (#8) Update automation name to reflect pinned state
+        System.Windows.Automation.AutomationProperties.SetName(PinButton, "Unpin concept");
+    }
 
     private void PinButton_Unchecked(object sender, RoutedEventArgs e)
-        => _stateManager.Fire(WidgetTrigger.Unpin);
+    {
+        _stateManager.Fire(WidgetTrigger.Unpin);
+        // (#8) Update automation name to reflect unpinned state
+        System.Windows.Automation.AutomationProperties.SetName(PinButton, "Pin concept");
+    }
 
     private void Next_Click(object sender, RoutedEventArgs e)
     {
