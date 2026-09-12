@@ -162,8 +162,11 @@ public partial class WidgetWindow : Window
         ContextMenu.Closed += (_, _) =>
         {
             _contextMenuOpen = false;
-            // Re-fire Deactivated logic now that the menu is gone, if still not active
-            if (!IsActive) _stateManager.Fire(WidgetTrigger.OutsideClick);
+            // Do NOT re-fire OutsideClick here — the user may have dismissed the
+            // context menu by clicking ON the widget (e.g. to expand it). That
+            // click fires WidgetTrigger.Click first; firing OutsideClick immediately
+            // after would collapse it back. OnDeactivated handles collapse correctly
+            // when the user clicks genuinely outside. (#7 audit fix)
         };
 
         _ = ApplyPositionAndOpacityAsync();
@@ -759,9 +762,8 @@ public partial class WidgetWindow : Window
             CompactCategory.Text      = _currentConcept.Category;
             CompactSlotIndicator.Text = $"{_currentIndex + 1}/3";
             CompactTitle.Text         = _currentConcept.Title;
-            var teaser = _currentConcept.Explanation.Length > 70
-                ? _currentConcept.Explanation[..70] + "…"
-                : _currentConcept.Explanation;
+            // Truncate at a word boundary near 70 chars — avoids mid-word ellipsis (#5)
+            var teaser = TruncateAtWord(_currentConcept.Explanation, 70);
             CompactTeaser.Text = teaser;
         }
         else
@@ -828,6 +830,19 @@ public partial class WidgetWindow : Window
         Dot1.Fill = _currentIndex == 0 ? active : inactive;
         Dot2.Fill = _currentIndex == 1 ? active : inactive;
         Dot3.Fill = _currentIndex == 2 ? active : inactive;
+    }
+
+    /// <summary>
+    /// Truncates text at the last word boundary at or before <paramref name="maxChars"/>.
+    /// Prevents mid-word ellipsis like "…connectio…" (#5 audit fix).
+    /// </summary>
+    private static string TruncateAtWord(string text, int maxChars)
+    {
+        if (text.Length <= maxChars) return text;
+        // Find the last space at or before maxChars
+        var lastSpace = text.LastIndexOf(' ', maxChars);
+        var cutAt = lastSpace > 0 ? lastSpace : maxChars;
+        return text[..cutAt].TrimEnd() + "…";
     }
 
     // ── Scheduler callbacks ───────────────────────────────────────────────────

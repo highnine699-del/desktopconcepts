@@ -89,3 +89,5 @@ Filename: "{app}\{#AppExeName}"; Description: "Launch {#AppName}"; Flags: nowait
 ; RunOnceId ensures this fires exactly once per uninstall. (#6 audit fix)
 Filename: "{cmd}"; Parameters: "/c taskkill /F /IM {#AppExeName} /T"; Flags: runhidden; RunOnceId: "CloseQuire"
 
+
+
